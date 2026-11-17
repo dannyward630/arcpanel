@@ -95,6 +95,8 @@ deadline=$(($(date +%s) + MALWARE_TIMEOUT))
 work=$(mktemp -d)
 chmod 700 "$work"
 trap 'rm -rf "$work"' EXIT
+# A cancelled scan job (TERM) removes the folder too (E15)
+exit_on_signals
 
 # The scan record: running now, completed at the end
 record() {
@@ -247,20 +249,6 @@ if [ "$new" -gt 0 ]; then
 			"<p>$new new suspicious file(s) of $user on $where_admin. <a href=\"/malware/$user\">Review them</a>.</p>" > /dev/null 2>&1
 	fi
 fi
-
-# A background scan started by v-start-user-malware-scan ends its task. The
-# starter holds the data lock until it has stored this PID.
-malware_lock "$user"
-if [ "$(malware_task_get "$user" PID)" = "$$" ]; then
-	exit_code=0
-	if [ "$status" = 'failed' ]; then
-		exit_code=$E_NOTEXIST
-	elif [ "$status" = 'partial' ]; then
-		exit_code=$E_UPDATE
-	fi
-	malware_task_set "$user" "STATUS=$status" "EXIT=$exit_code" "END=$(date +'%F %T')" PID=
-fi
-malware_unlock
 
 malware_print_object "$result" "$format"
 

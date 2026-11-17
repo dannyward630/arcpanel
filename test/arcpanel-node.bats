@@ -22,6 +22,7 @@ MIRROR=/root/arcpanel-node-mirror
 BAD_MIRROR=/root/arcpanel-node-mirror-bad
 PASS="Tn-$(date +%s)-Pass"
 USERS="tnu1 tnu2 tnu3 tnoff tnres tncust tnjail"
+FAKE_JOB=99999999999903
 
 make_package() {
     local name=$1 node=$2 versions=$3 allowed=$4 shell=${5:-bash} tmp
@@ -63,6 +64,10 @@ build_mirrors() {
         curl -sSfL -o "$MIRROR/index.json" https://nodejs.org/dist/index.json
         curl -sSfL -o "$MIRROR/schedule.json" https://raw.githubusercontent.com/nodejs/Release/main/schedule.json
     fi
+    # The suite expects Node.js 24 to be the newest LTS (Krypton). Node.js 26 became LTS on
+    # 2026-10-28, so the mirror keeps majors up to 24 only: "lts" resolves to the mirrored v24
+    jq -c '[.[] | select((.version | ltrimstr("v") | split(".")[0] | tonumber? // 999) <= 24)]' \
+        "$MIRROR/index.json" > "$MIRROR/index.json.tmp" && mv -f "$MIRROR/index.json.tmp" "$MIRROR/index.json"
     if [ ! -s "$MIRROR/nvm.tar.gz" ]; then
         cp "$CACHE/nvm-"*.tar.gz "$MIRROR/nvm.tar.gz" 2> /dev/null \
             || curl -sSfL -o "$MIRROR/nvm.tar.gz" https://github.com/nvm-sh/nvm/archive/refs/tags/v0.40.8.tar.gz
@@ -106,6 +111,10 @@ cleanup() {
         v-delete-user-package "$package" > /dev/null 2>&1 || true
         rm -f "$PKG_DIR/$package.tenancy"
     done
+    # The fake job of "Tasks: one task at a time". A run stopped inside that
+    # test leaves it behind, and its ID sorts above every real job, so it
+    # stays the newest task of tnu1 and breaks the task cases of the next run
+    rm -f "$ARCPANEL/data/jobs/$FAKE_JOB".*
 }
 
 setup_file() {
@@ -168,6 +177,29 @@ setup() {
     run v-list-sys-node-releases
     assert_success
     assert_line --partial "MAJOR"
+}
+
+@test "Releases: a pre-release in the index is left out (v27.0.0-alpha.0.0.0, 2026-10-29)" {
+    local pre=/root/arcpanel-node-mirror-pre arch
+    arch=linux-$(node_arch_name)
+    rm -rf "$pre"
+    mkdir -p "$pre"
+    cp "$MIRROR/schedule.json" "$pre/"
+    jq -c --arg a "$arch" '[{version: "v99.0.0-alpha.1", date: "2026-10-29", files: [$a], lts: false, security: false}] + .' \
+        "$MIRROR/index.json" > "$pre/index.json"
+    use_mirror "$pre"
+    run v-update-sys-node-releases
+    assert_success
+    run v-list-sys-node-releases json
+    assert_success
+    echo "$output" | jq -e --arg v "$V24" '.RELEASES[] | select(.MAJOR == "24") | .LATEST == $v'
+    echo "$output" | jq -e '[.RELEASES[] | select(.MAJOR == "99")] | length == 0'
+    run bash -c "source /etc/arcpanel/arcpanel.conf; source $ARCPANEL/func/main.sh; source $ARCPANEL/func/node.sh; source_conf $CONF; node_resolve 24"
+    assert_success
+    assert_output "$V24"
+    use_mirror "$MIRROR"
+    v-update-sys-node-releases > /dev/null
+    rm -rf "$pre"
 }
 
 @test "Releases: an unreachable server keeps the old index" {
@@ -497,10 +529,12 @@ wait_task() {
 }
 
 @test "Tasks: one task at a time; a task whose process died is failed" {
-    bash -c 'exec -a v-run-user-node-task sleep 60' &
+    bash -c 'exec -a v-run-job sleep 60' &
     pid=$!
-    conf=$ARCPANEL/data/users/tnu1/node-task.conf
-    echo "ID='1' ACTION='add-version' ARGS='lts' STATUS='running' PID='$pid' EXIT='' START='' END=''" > "$conf"
+    id=$FAKE_JOB
+    now=$(date +'%F %T')
+    conf=$ARCPANEL/data/jobs/$id.conf
+    echo "ID='$id' TYPE='node.install' USER='tnu1' OWNER='admin' ACTOR='cli' OBJECT='node:tnu1' ARGS='v-run-user-node-task tnu1 add-version lts' STATUS='running' EXIT='' ERROR='' UNIT='' PID='$pid' QUEUED='$now' START='$now' END='' HEARTBEAT='$now' ATTEMPTS='1' RETRY_OF='' RESOURCE='' UPDATED='$now'" > "$conf"
     run v-start-user-node-task tnu1 add-version lts
     assert_failure 7
     run v-delete-user-node-version tnu1 "$V24"
@@ -511,6 +545,7 @@ wait_task() {
     echo "$output" | jq -e '.STATUS == "failed"'
     run grep -c "STATUS='failed'" "$conf"
     assert_output "1"
+    rm -f "$ARCPANEL/data/jobs/$id".*
 }
 
 @test "Tasks: arguments are checked before the start" {
@@ -529,7 +564,7 @@ wait_task() {
 }
 
 @test "Tasks: the runner refuses a task it was not given" {
-    run v-run-user-node-task 42 tnu1 add-version lts
+    run v-run-user-node-task tnu1 add-version lts
     assert_failure 10
 }
 

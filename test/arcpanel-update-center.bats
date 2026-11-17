@@ -279,9 +279,10 @@ notification_ids() {
 '
 }
 
-# Notifications of the administrator added since server_setup
+# update.result events (E16) written since server_setup: the alert rule of
+# the event sends the administrator's notification and mail
 new_notifications() {
-	notification_ids | grep -cvxF -f "$TMP/notifications" || true
+	tail -n +"$(($(cat "$TMP/events") + 1))" "$SERVER_ARCPANEL/data/alerts/events.log" 2> /dev/null | grep -c '"type":"update.result"' || true
 }
 
 server_setup() {
@@ -292,6 +293,7 @@ server_setup() {
 	ADMIN="$(grep -m1 "^ROOT_USER=" "$SERVER_ARCPANEL/conf/arcpanel.conf" | cut -d"'" -f2)"
 	ADMIN="${ADMIN:-admin}"
 	notification_ids > "$TMP/notifications"
+	grep -c '' "$SERVER_ARCPANEL/data/alerts/events.log" 2> /dev/null > "$TMP/events" || echo 0 > "$TMP/events"
 	INSTALLED="$(grep -m1 "^VERSION=" "$SERVER_ARCPANEL/conf/arcpanel.conf" | cut -d"'" -f2)"
 	BASE="${INSTALLED%%~*}"
 	LINE="${BASE%.*}"
@@ -334,7 +336,7 @@ cmd() {
 	assert_output --partial "$PATCH"
 	# A refresh also refreshes the ArcPanel package list, which AVAILABLE
 	# and the pre-flight read; a plain list does not
-	run grep -c '^update .*sources.list.d/arcpanel.list' "$TMP/apt-get.log"
+	run grep -c "^update -o Dir::Etc::sourcelist=$UPD_APT_LIST " "$TMP/apt-get.log"
 	assert_output 1
 }
 
@@ -874,14 +876,16 @@ runner() {
 	server_setup
 	apt_installs
 	task_manifest
-	conf="$SERVER_ARCPANEL/data/sys-task/task.conf"
-	cp "$conf" "$TMP/task.conf" 2> /dev/null || true
-	bash -c 'exec -a v-run-sys-task sleep 60' &
+	# a running sys.arcpanel-release job (E15) with a live runner
+	conf="$SERVER_ARCPANEL/data/jobs/99999999999901.conf"
+	mkdir -p "$SERVER_ARCPANEL/data/jobs"
+	bash -c 'exec -a v-run-job sleep 60' &
 	pid=$!
-	echo "ID='1' KIND='arcpanel-release' ARGS='$PATCH policy policy' STATUS='running' PID='$pid' UNIT='' EXIT='' START='' END=''" > "$conf"
+	now=$(date +'%F %T')
+	echo "ID='99999999999901' TYPE='sys.arcpanel-release' USER='system' OWNER='system' ACTOR='cli' OBJECT='arcpanel' ARGS='v-run-sys-task arcpanel-release $PATCH policy policy' STATUS='running' EXIT='' ERROR='' UNIT='' PID='$pid' QUEUED='$now' START='$now' END='' HEARTBEAT='$now' ATTEMPTS='1' RETRY_OF='' RESOURCE='' UPDATED='$now'" > "$conf"
 	run runner
 	kill "$pid" 2> /dev/null || true
-	if [ -f "$TMP/task.conf" ]; then cp "$TMP/task.conf" "$conf"; else rm -f "$conf"; fi
+	rm -f "$SERVER_ARCPANEL/data/jobs/99999999999901".*
 	assert_success
 	[ ! -f "$TMP/start-task.log" ]
 	run jq -r 'length' <<< "$(history_json)"

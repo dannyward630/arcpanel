@@ -3,12 +3,15 @@ import apAccessKeySecret from './access-key-secret.js';
 import apBackupJob from './backup-job.js';
 import apBulkBar from './bulk-bar.js';
 import apCardPicker from './card-picker.js';
+import apChoiceList from './choice-list.js';
 import apCommunityCard from './community-card.js';
 import apConfirm from './confirm.js';
 import apCronBuilder from './cron-builder.js';
 import apCsr from './csr.js';
 import apDeploy from './deploy.js';
 import apDnsRecord from './dns-record.js';
+import apFormState from './form-state.js';
+import apLimit from './limit.js';
 import apLog from './log.js';
 import apMailAccount from './mail-account.js';
 import apModal from './modal.js';
@@ -20,9 +23,11 @@ import { apNameList, apPhpExtension, apPhpExtensionFilter, apPhpProfile } from '
 import { autoTrim, focusFirst } from './plugins.js';
 import apRrdGraph from './rrd-graph.js';
 import apSecretStore from './secret-store.js';
+import apSectionNav from './section-nav.js';
 import apSidebar from './sidebar.js';
 import apTable from './table.js';
 import apTabs from './tabs.js';
+import apJob from './job.js';
 import apTask from './task.js';
 import apTerminal from './terminal.js';
 import apToast from './toast.js';
@@ -37,12 +42,15 @@ export const modules = {
 	apBackupJob,
 	apBulkBar,
 	apCardPicker,
+	apChoiceList,
 	apCommunityCard,
 	apConfirm,
 	apCronBuilder,
 	apCsr,
 	apDeploy,
 	apDnsRecord,
+	apFormState,
+	apLimit,
 	apLog,
 	apMailAccount,
 	apModal,
@@ -56,9 +64,11 @@ export const modules = {
 	apPhpProfile,
 	apRrdGraph,
 	apSecretStore,
+	apSectionNav,
 	apSidebar,
 	apTable,
 	apTabs,
+	apJob,
 	apTask,
 	apTerminal,
 	apToast,

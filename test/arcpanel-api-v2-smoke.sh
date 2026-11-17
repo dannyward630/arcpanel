@@ -27,6 +27,10 @@
 # trusted publisher and turns it off again; the deploy port is open while it
 # is on. Nothing is uploaded or deployed.
 #
+# Alerts (E16) add an email channel and, when the secret store is set up, a
+# Slack channel whose webhook points at a closed local port, so its test
+# fails without leaving the server; both are deleted again.
+#
 # Run as root on a test server, never on production.
 
 set -euo pipefail
@@ -43,6 +47,8 @@ FILES_USER="${SMOKE_USER}f"
 ACCOUNTS_USER="${SMOKE_USER}c"
 PHP_USER="${SMOKE_USER}p"
 MALWARE_USER="${SMOKE_USER}m"
+ALERTS_USER="${SMOKE_USER}l"
+DOCTOR_USER="${SMOKE_USER}d"
 PHP_PACKAGE="$SMOKE_PACKAGE-php"
 APPS_PACKAGE="$SMOKE_PACKAGE-apps"
 STORAGE_PACKAGE="$SMOKE_PACKAGE-s3"
@@ -51,6 +57,7 @@ ROOT_USER=$(grep "^ROOT_USER=" "$CONF" | cut -d"'" -f2)
 OLD_API_SYSTEM=$(grep "^API_SYSTEM=" "$CONF" | cut -d"'" -f2 || true)
 OLD_API_ALLOWED_IP=$(grep "^API_ALLOWED_IP=" "$CONF" | cut -d"'" -f2 || true)
 OLD_MALWARE_SCAN=$(grep "^MALWARE_SCAN=" "$CONF" | cut -d"'" -f2 || true)
+OLD_DOCTOR_RESOLVER=$(grep "^DOCTOR_RESOLVER=" "$CONF" | cut -d"'" -f2 || true)
 BODY="$(mktemp)"
 CERT_DIR="$(mktemp -d)"
 FILES_DIR="$(mktemp -d)"
@@ -74,6 +81,13 @@ cleanup() {
 	"$ARCPANEL/bin/v-delete-user" "$ACCOUNTS_USER" > /dev/null 2>&1 || true
 	"$ARCPANEL/bin/v-delete-user" "$PHP_USER" > /dev/null 2>&1 || true
 	"$ARCPANEL/bin/v-delete-user" "$MALWARE_USER" > /dev/null 2>&1 || true
+	"$ARCPANEL/bin/v-delete-user" "$ALERTS_USER" > /dev/null 2>&1 || true
+	"$ARCPANEL/bin/v-delete-user" "$DOCTOR_USER" > /dev/null 2>&1 || true
+	if [ -n "$OLD_DOCTOR_RESOLVER" ]; then
+		"$ARCPANEL/bin/v-change-sys-config-value" DOCTOR_RESOLVER "$OLD_DOCTOR_RESOLVER" > /dev/null 2>&1 || true
+	else
+		sed -i '/^DOCTOR_RESOLVER=/d' "$CONF"
+	fi
 	if [ "$OLD_MALWARE_SCAN" = yes ]; then
 		"$ARCPANEL/bin/v-add-sys-malware-scan" quiet
 	else
@@ -102,8 +116,10 @@ cleanup() {
 	"$ARCPANEL/bin/v-change-sys-config-value" API_SYSTEM "${OLD_API_SYSTEM:-0}"
 	"$ARCPANEL/bin/v-change-sys-config-value" API_ALLOWED_IP "$OLD_API_ALLOWED_IP"
 	clear_panel_cache
-	# A queued certificate of a smoke domain
-	sed -i "/ $SMOKE_USER\.example\.test /d; / $APPS_USER\.example\.test /d" "$ARCPANEL/data/queue/letsencrypt.pipe" 2> /dev/null || true
+	# A queued certificate of a smoke domain: its letsencrypt.domain job (E15)
+	le_cancel "$SMOKE_USER" ''
+	le_cancel "$APPS_USER" ''
+	le_release "${LE_HOLD:-}"
 	rm -rf "$BODY" "$CERT_DIR" "$FILES_DIR"
 }
 trap cleanup EXIT
@@ -140,11 +156,60 @@ call() {
 # json FILTER -> value of the last answer
 json() { jq -r "$1" "$BODY"; }
 
-# wait_v2_task KEY TASK_ID [MAX_SECONDS] — poll GET /tasks/{id}, drive the backup queue
+# le_jobs USER DOMAIN — IDs of the queued or running letsencrypt.domain jobs of
+# USER for DOMAIN (every domain of USER when DOMAIN is empty), the queue of
+# certificates since E15
+le_jobs() {
+	local conf
+	for conf in "$ARCPANEL"/data/jobs/*.conf; do
+		[ -f "$conf" ] || continue
+		grep -qF "TYPE='letsencrypt.domain' USER='$1' " "$conf" || continue
+		if [ -n "$2" ]; then
+			grep -qF -e "OBJECT='web:$2' " -e "OBJECT='mail:$2' " "$conf" || continue
+		fi
+		grep -qE "STATUS='(queued|running)' " "$conf" || continue
+		basename "$conf" .conf
+	done
+}
+
+# le_queued USER DOMAIN — the command lines of those jobs, one per line
+le_queued() {
+	local id
+	for id in $(le_jobs "$1" "$2"); do
+		tr '\0' ' ' < "$ARCPANEL/data/jobs/$id.argv"
+		echo
+	done
+}
+
+# le_cancel USER DOMAIN — cancel those jobs, so that no certificate is issued
+le_cancel() {
+	local id
+	for id in $(le_jobs "$1" "$2"); do
+		"$ARCPANEL/bin/v-cancel-job" "$id" arcsmoke > /dev/null 2>&1 || true
+	done
+}
+
+# le_hold — hold the letsencrypt queue with a running job of a live fake
+# runner, so that a smoke request stays queued and asks Let's Encrypt for
+# nothing; prints the PID of the runner. le_release PID ends the hold.
+le_hold() {
+	local now
+	now=$(date +'%F %T')
+	bash -c 'exec -a v-run-job sleep 300' > /dev/null 2>&1 &
+	echo "ID='19990101120098' TYPE='letsencrypt.domain' USER='system' OWNER='system' ACTOR='arcsmoke' OBJECT='letsencrypt-hold' ARGS='v-add-letsencrypt-domain' STATUS='running' EXIT='' ERROR='' UNIT='' PID='$!' QUEUED='$now' START='$now' END='' HEARTBEAT='$now' ATTEMPTS='1' RETRY_OF='' RESOURCE='' UPDATED='$now'" > "$ARCPANEL/data/jobs/19990101120098.conf"
+	echo "$!"
+}
+
+le_release() {
+	kill "$1" 2> /dev/null || true
+	rm -f "$ARCPANEL"/data/jobs/19990101120098.*
+}
+
+# wait_v2_task KEY TASK_ID [MAX_SECONDS] — poll GET /tasks/{id}, drive the job queue
 wait_v2_task() {
 	local key="$1" task_id="$2" max="${3:-600}" i st
 	for i in $(seq 1 "$max"); do
-		"$ARCPANEL/bin/v-update-sys-queue" backup > /dev/null 2>&1 || true
+		"$ARCPANEL/bin/v-update-sys-jobs" > /dev/null 2>&1 || true
 		call "$key" GET "/tasks/$task_id" > /dev/null
 		st="$(json .data.status)"
 		case "$st" in
@@ -329,9 +394,11 @@ check "setWebDomainSsl changes HSTS alone" 200 "$(call "$WRITER" PUT "$WEB/$SMOK
 check "HSTS is on" yes "$(domain_value SSL_HSTS)"
 check "deleteWebDomainSsl answers 204" 204 "$(call "$WRITER" DELETE "$WEB/$SMOKE_DOMAIN/ssl")"
 check "the domain has no SSL" no "$(domain_value SSL)"
+LE_HOLD=$(le_hold)
 check "requestWebDomainLetsEncrypt answers 202" 202 "$(call "$WRITER" POST "$WEB/$SMOKE_DOMAIN/letsencrypt" '{"key_algorithm": "ecdsa-384"}')"
-check "the certificate is queued with its key type" 1 "$(grep -c " $SMOKE_DOMAIN .* no ecdsa-384$" "$ARCPANEL/data/queue/letsencrypt.pipe")"
-sed -i "/ $SMOKE_DOMAIN /d" "$ARCPANEL/data/queue/letsencrypt.pipe"
+check "the certificate is queued with its key type" 1 "$(le_queued "$SMOKE_USER" "$SMOKE_DOMAIN" | grep -c "/v-add-letsencrypt-domain $SMOKE_USER $SMOKE_DOMAIN .* no ecdsa-384 $")"
+le_cancel "$SMOKE_USER" "$SMOKE_DOMAIN"
+le_release "$LE_HOLD"
 check "deleteWebDomain answers 204" 204 "$(call "$WRITER" DELETE "$WEB/$SMOKE_DOMAIN")"
 check "the domain is gone" 404 "$(call "$WRITER" GET "$WEB/$SMOKE_DOMAIN")"
 
@@ -356,9 +423,11 @@ check "the mail domain needs an MX record" MX "$(
 	call "$MAIL_KEY" GET "$MAIL/$SMOKE_DOMAIN/dns-records" > /dev/null
 	json '.data[] | select(.type=="MX") | .type'
 )"
+LE_HOLD=$(le_hold)
 check "requestMailDomainLetsEncrypt answers 202" 202 "$(call "$MAIL_KEY" POST "$MAIL/$SMOKE_DOMAIN/letsencrypt" '{"key_algorithm": "ecdsa-256"}')"
-check "the mail certificate is queued" 1 "$(grep -c " $SMOKE_DOMAIN '' yes " "$ARCPANEL/data/queue/letsencrypt.pipe")"
-sed -i "/ $SMOKE_DOMAIN /d" "$ARCPANEL/data/queue/letsencrypt.pipe"
+check "the mail certificate is queued" 1 "$(le_queued "$SMOKE_USER" "$SMOKE_DOMAIN" | grep -c "/v-add-letsencrypt-domain $SMOKE_USER $SMOKE_DOMAIN  yes ")"
+le_cancel "$SMOKE_USER" "$SMOKE_DOMAIN"
+le_release "$LE_HOLD"
 check "deleteMailAccount answers 204" 204 "$(call "$MAIL_KEY" DELETE "$MAIL/$SMOKE_DOMAIN/accounts/info")"
 check "deleteMailDomain answers 204" 204 "$(call "$MAIL_KEY" DELETE "$MAIL/$SMOKE_DOMAIN")"
 
@@ -399,18 +468,20 @@ check "deleteCronJob answers 204 for the journaled job" 204 "$(call "$CRON_KEY" 
 WEB="/users/$SMOKE_USER/web-domains"
 BK="/users/$SMOKE_USER/backups"
 check "a web domain for the backup smoke" 201 "$(call "$WRITER" POST "$WEB" "{\"domain\": \"$SMOKE_DOMAIN\"}")"
+LE_HOLD=$(le_hold)
 le_headers=$(curl -sk -D - -o /dev/null -X POST \
 	-H "Authorization: Bearer $WRITER" -H 'Accept: application/json' -H 'Content-Type: application/json' \
 	--data '{"key_algorithm": "ecdsa-384"}' "$API$WEB/$SMOKE_DOMAIN/letsencrypt")
 le_code=$(head -1 <<< "$le_headers" | awk '{print $2}')
 check "requestWebDomainLetsEncrypt answers 202" 202 "$le_code"
 check "requestWebDomainLetsEncrypt sends Link rel=monitor" 1 "$(grep -ci 'link:.*tasks/.*rel="monitor"' <<< "$le_headers")"
-sed -i "/ $SMOKE_DOMAIN /d" "$ARCPANEL/data/queue/letsencrypt.pipe"
+le_cancel "$SMOKE_USER" "$SMOKE_DOMAIN"
+le_release "$LE_HOLD"
 
 BACKUP_KEY=$(new_key "$SMOKE_USER" v2-backup)
 check "createBackup answers 202" 202 "$(call "$BACKUP_KEY" POST "$BK")"
 BK_TASK="$(json .data.id)"
-if [[ "$BK_TASK" == queue:"$SMOKE_USER":* ]]; then ok "createBackup returns a queue task id"; else fail "createBackup task id (got '$BK_TASK')"; fi
+if [[ "$BK_TASK" =~ ^job:[0-9]{14}$ ]]; then ok "createBackup returns a job task id (E15)"; else fail "createBackup task id (got '$BK_TASK')"; fi
 wait_v2_task "$BACKUP_KEY" "$BK_TASK" 900
 if [ "$(call "$BACKUP_KEY" GET "/tasks/$BK_TASK")" = 200 ] && [ "$(json .data.status)" = succeeded ]; then
 	BK_NAME="$(call "$BACKUP_KEY" GET "$BK" > /dev/null && json '.data[0].name')"
@@ -511,7 +582,7 @@ NODE_APP="/users/$APPS_USER/node-apps/$APPS_DOMAIN"
 check "setNodeEnabled answers 200" 200 "$(call "$APPS_KEY" PUT "$NODE" '{"enabled": true}')"
 check "installNodeVersion answers 202" 202 "$(call "$APPS_KEY" POST "$NODE/versions" '{"spec": "lts"}')"
 NODE_TASK="$(json .data.id)"
-if [[ "$NODE_TASK" == node:"$APPS_USER":* ]] && wait_v2_task "$APPS_KEY" "$NODE_TASK" 600; then
+if [[ "$NODE_TASK" =~ ^job:[0-9]{14}$ ]] && wait_v2_task "$APPS_KEY" "$NODE_TASK" 600; then
 	check "a web domain for the Node.js app" 201 "$(call "$APPS_WRITER" POST "/users/$APPS_USER/web-domains" "{\"domain\": \"$APPS_DOMAIN\"}")"
 	app_dir="/home/$APPS_USER/web/$APPS_DOMAIN/public_html"
 	cat > "$app_dir/server.js" << 'EOF'
@@ -603,7 +674,7 @@ proc_headers=$(curl -sk -D - -o "$BODY" -X POST \
 	--data '{"task": "custom", "command": "python3 --version"}' "$API$PROC/tasks")
 check "startAppProcessTask answers 202" 202 "$(head -1 <<< "$proc_headers" | awk '{print $2}')"
 proc_task_id=$(grep -i '^link:' <<< "$proc_headers" | sed -E 's#.*/api/v2/tasks/([^>]+)>.*#\1#' | tr -d '\r')
-check "startAppProcessTask sends Link to an app-process task (Fleet PD4)" "app-process:$APPS_USER:" "${proc_task_id%"${proc_task_id##*:}"}"
+check "startAppProcessTask sends Link to its job (Fleet PD4, E15)" 1 "$([[ "$proc_task_id" =~ ^job:[0-9]{14}$ ]] && echo 1 || echo 0)"
 proc_task=running
 for _ in $(seq 1 60); do
 	call "$APPS_KEY" GET "/users/$APPS_USER/app-process-task" > /dev/null
@@ -1094,6 +1165,76 @@ check "a dry run is not recorded" 0 "$(
 )"
 check "verifyAuditChain answers an intact chain" true "$(call "$AUDIT_KEY" GET "/audit/verify?from=$AUDIT_FROM" > /dev/null && json .data.ok)"
 check "v-check-sys-audit agrees" 0 "$("$ARCPANEL/bin/v-check-sys-audit" "$AUDIT_FROM" > /dev/null && echo 0 || echo $?)"
+
+# Alerts (E16 spec §8): an account's rules and channels with a key holding
+# only v2-alerts; the server scope is the server area (v2-server)
+check "a user for alerts" 201 "$(call "$ADMIN" POST /users "{\"username\": \"$ALERTS_USER\", \"password\": \"$SMOKE_PASS\", \"email\": \"$ALERTS_USER@example.invalid\", \"name\": \"Smoke alerts\", \"package\": \"default\"}")"
+ALERTS_KEY="$(new_key "$ALERTS_USER" v2-alerts)"
+ALERTS="/users/$ALERTS_USER"
+check "listAlertRules answers 200 with a key holding only v2-alerts" 200 "$(call "$ALERTS_KEY" GET "$ALERTS/alert-rules")"
+check "the account has the ssl.expiring rule" 1 "$(json '[.data[] | select(.rule == "ssl.expiring")] | length')"
+check "listAlertChannels answers 200" 200 "$(call "$ALERTS_KEY" GET "$ALERTS/alert-channels")"
+alerts_panel="$(json '[.data[] | select(.type == "panel")][0].id')"
+check "the account has its panel channel" true "$([[ "$alerts_panel" =~ ^[0-9]{14}$ ]] && echo true || echo false)"
+check "createAlertChannel dry run answers 200" 200 "$(call "$ALERTS_KEY" POST "$ALERTS/alert-channels?dry_run=1" '{"name": "Smoke mail", "type": "email", "target": "alerts@example.invalid"}')"
+check "the dry run plans v-add-alert-channel" v-add-alert-channel "$(json '.data.steps[0].command')"
+check "createAlertChannel answers 201" 201 "$(call "$ALERTS_KEY" POST "$ALERTS/alert-channels" '{"name": "Smoke mail", "type": "email", "target": "alerts@example.invalid"}')"
+alerts_mail="$(json .data.id)"
+check "a v2-read key may not add a channel" 403 "$(call "$(new_key "$ALERTS_USER" v2-read)" POST "$ALERTS/alert-channels" '{"name": "Read", "type": "email", "target": "read@example.invalid"}')"
+check "updateAlertRule answers 200" 200 "$(call "$ALERTS_KEY" PUT "$ALERTS/alert-rules/ssl.expiring" "{\"warning\": 20, \"channels\": [\"$alerts_panel\", \"$alerts_mail\"]}")"
+check "the rule sends to both channels at 20 days" "20 2" "$(json '"\(.data.warning) \(.data.channels | length)"')"
+check "the command has the change" "$alerts_panel,$alerts_mail" "$("$ARCPANEL/bin/v-list-alert-rules" "$ALERTS_USER" json | jq -r '.["ssl.expiring"].CHANNELS')"
+check "testAlertChannel of the panel channel answers ok" "200 true" "$(call "$ALERTS_KEY" POST "$ALERTS/alert-channels/$alerts_panel/test") $(json .data.ok)"
+if ! command -v age > /dev/null 2>&1 || [ ! -f "$ARCPANEL/data/secrets/.master/identity" ]; then
+	skip "alerts: the secret store is not set up, no Slack channel"
+else
+	check "a Slack channel answers 201" 201 "$(call "$ALERTS_KEY" POST "$ALERTS/alert-channels" '{"name": "Smoke Slack", "type": "slack", "secret": "http://127.0.0.1:9/arcsmoke-hook"}')"
+	alerts_slack="$(json .data.id)"
+	check "the answer holds no webhook URL" "true 0" "$(json .data.secret_set) $(grep -c arcsmoke-hook "$BODY" || true)"
+	check "the test of the closed port fails with an error" "200 false true" "$(call "$ALERTS_KEY" POST "$ALERTS/alert-channels/$alerts_slack/test") $(json .data.ok) $(json '.data.error | length > 0')"
+	if grep -q arcsmoke-hook "$BODY"; then fail "the test error names the webhook URL"; else ok "the test error hides the webhook URL"; fi
+	check "the Slack channel is deleted" 204 "$(call "$ALERTS_KEY" DELETE "$ALERTS/alert-channels/$alerts_slack")"
+fi
+check "listAlertHistory answers 200" 200 "$(call "$ALERTS_KEY" GET "$ALERTS/alert-history?limit=10")"
+check "listAlerts answers 200" 200 "$(call "$ALERTS_KEY" GET /alerts)"
+check "the panel channel cannot be deleted" 403 "$(call "$ALERTS_KEY" DELETE "$ALERTS/alert-channels/$alerts_panel")"
+check "deleteAlertChannel answers 204" 204 "$(call "$ALERTS_KEY" DELETE "$ALERTS/alert-channels/$alerts_mail")"
+check "the rule no longer names the deleted channel" "$alerts_panel" "$("$ARCPANEL/bin/v-list-alert-rules" "$ALERTS_USER" json | jq -r '.["ssl.expiring"].CHANNELS')"
+check "the v2-alerts key may not list web domains" 403 "$(call "$ALERTS_KEY" GET "$ALERTS/web-domains")"
+check "the v2-alerts key may not read the server rules" 403 "$(call "$ALERTS_KEY" GET /system/alert-rules)"
+check "listSystemAlertRules answers 200 for the administrator" 200 "$(call "$ADMIN" GET /system/alert-rules)"
+check "the server has the disk.usage rule" 1 "$(json '[.data[] | select(.rule == "disk.usage")] | length')"
+check "listSystemAlertChannels answers 200" 200 "$(call "$ADMIN" GET /system/alert-channels)"
+check "listSystemAlertHistory answers 200" 200 "$(call "$ADMIN" GET '/system/alert-history?limit=10')"
+check "the alerts user is deleted" 204 "$(call "$ADMIN" DELETE "/users/$ALERTS_USER")"
+
+# Doctor (E17 spec §6): the domain checks of an account with a key holding
+# only v2-security, the server checks for the administrator. The resolver is
+# TEST-NET while the smoke runs, so no check asks the internet.
+"$ARCPANEL/bin/v-change-sys-config-value" DOCTOR_RESOLVER 192.0.2.1 > /dev/null
+DOCTOR="/users/$DOCTOR_USER"
+DOCTOR_DOMAIN="$DOCTOR_USER.example"
+check "a user for the Doctor" 201 "$(call "$ADMIN" POST /users "{\"username\": \"$DOCTOR_USER\", \"password\": \"$SMOKE_PASS\", \"email\": \"$DOCTOR_USER@example.invalid\", \"name\": \"Smoke doctor\", \"package\": \"default\"}")"
+"$ARCPANEL/bin/v-add-web-domain" "$DOCTOR_USER" "$DOCTOR_DOMAIN" > /dev/null
+DOCTOR_KEY="$(new_key "$DOCTOR_USER" v2-security)"
+check "listDoctorDomains answers 200 with a key holding only v2-security" 200 "$(call "$DOCTOR_KEY" GET "$DOCTOR/doctor")"
+check "the domain is listed, not checked yet" "$DOCTOR_DOMAIN null" "$(json '"\(.data[0].domain) \(.data[0].checked_at)"')"
+check "runDoctorDomain dry run plans v-run-sys-doctor" "200 v-run-sys-doctor" "$(call "$DOCTOR_KEY" POST "$DOCTOR/doctor/$DOCTOR_DOMAIN/run?dry_run=1") $(json '.data.steps[0].command')"
+check "a v2-read key may not run the Doctor" 403 "$(call "$(new_key "$DOCTOR_USER" v2-read)" POST "$DOCTOR/doctor/$DOCTOR_DOMAIN/run")"
+doctor_headers="$(mktemp)"
+check "runDoctorDomain answers 202" 202 "$(curl -sk -o "$BODY" -D "$doctor_headers" -w '%{http_code}' -X POST -H "Authorization: Bearer $DOCTOR_KEY" -H 'Accept: application/json' -H 'Content-Type: application/json' -d '{}' "$API$DOCTOR/doctor/$DOCTOR_DOMAIN/run")"
+check "the task is a doctor.run job" doctor.run "$(json .data.kind)"
+doctor_task="$(json .data.id)"
+check "runDoctorDomain sends Link rel=monitor" 1 "$(grep -ci 'link:.*tasks/.*rel="monitor"' "$doctor_headers")"
+rm -f "$doctor_headers"
+wait_v2_task "$DOCTOR_KEY" "$doctor_task" 300
+check "getDoctorDomain answers the 7 web checks" "200 7" "$(call "$DOCTOR_KEY" GET "$DOCTOR/doctor/$DOCTOR_DOMAIN") $(json '.data.checks | length')"
+check "the DNS checks skip: the resolver does not answer" skip "$(json '.data.checks[] | select(.id == "web.dns-a") | .status')"
+check "a check without a fix answers 409" "409 E_EXISTS" "$(call "$DOCTOR_KEY" POST "$DOCTOR/doctor/$DOCTOR_DOMAIN/checks/web.dns-a/fix") $(json .error.code)"
+check "the v2-security key may not read the server checks" 403 "$(call "$DOCTOR_KEY" GET /system/doctor)"
+check "getSystemDoctor answers 200 for the administrator" 200 "$(call "$ADMIN" GET /system/doctor)"
+check "runSystemDoctor dry run plans v-run-sys-doctor" "200 v-run-sys-doctor" "$(call "$ADMIN" POST '/system/doctor/run?dry_run=1') $(json '.data.steps[0].command')"
+check "the Doctor user is deleted" 204 "$(call "$ADMIN" DELETE "/users/$DOCTOR_USER")"
 
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"

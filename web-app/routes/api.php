@@ -2,6 +2,7 @@
 
 use App\Api\ApiHeaders;
 use App\Http\Controllers\Api\V2\AccessKeyController;
+use App\Http\Controllers\Api\V2\AlertController;
 use App\Http\Controllers\Api\V2\AppProcessController;
 use App\Http\Controllers\Api\V2\AuditController;
 use App\Http\Controllers\Api\V2\BackupController;
@@ -15,6 +16,7 @@ use App\Http\Controllers\Api\V2\DnsController;
 use App\Http\Controllers\Api\V2\DockerAppController;
 use App\Http\Controllers\Api\V2\DockerCatalogController;
 use App\Http\Controllers\Api\V2\DockerEngineController;
+use App\Http\Controllers\Api\V2\DoctorController;
 use App\Http\Controllers\Api\V2\FileController;
 use App\Http\Controllers\Api\V2\FileFetchController;
 use App\Http\Controllers\Api\V2\FileTransferController;
@@ -109,10 +111,45 @@ Route::get('/audit/verify', [AuditController::class, 'verify'])->name('audit.ver
 Route::get('/malware', [MalwareController::class, 'summary'])->middleware('sys-config:MALWARE_SCAN=yes')->name('malware.summary');
 Route::get('/access-key-sets', [AccessKeyController::class, 'sets'])->name('access-key-sets.index');
 
+// Doctor of the server (E17 spec §6): administrators read the server
+// checks, run them and fix them
+Route::prefix('/system/doctor')->name('system.doctor.')->group(function () {
+    Route::get('/', [DoctorController::class, 'system'])->name('show');
+    Route::middleware('not-readonly')->group(function () {
+        Route::post('/run', [DoctorController::class, 'runSystem'])->name('run');
+        Route::post('/checks/{check}/fix', [DoctorController::class, 'fixSystem'])->where('check', 'server\.[a-z0-9-]{1,64}')->name('fix');
+    });
+});
+
 // Docker catalog (E34 batch 4 spec §4.3, D44)
 Route::get('/docker-catalog', [DockerCatalogController::class, 'index'])->defaults('api_area', 'apps')->name('docker-catalog.index');
 Route::get('/docker-catalog/{slug}', [DockerCatalogController::class, 'show'])->defaults('api_area', 'apps')->name('docker-catalog.show');
 
+// Alerts (E16 spec §8): the open alerts of every scope the key sees, the
+// rules, channels and history of the server scope (administrators)
+Route::get('/alerts', [AlertController::class, 'all'])->name('alerts.index');
+Route::prefix('/system')->name('system.')->group(function () {
+    $rule = ['rule' => '[a-z0-9.-]{1,64}'];
+    $id = ['id' => '\d{14}'];
+    Route::get('/alert-rules', [AlertController::class, 'systemRules'])->name('alert-rules.index');
+    Route::get('/alert-rules/{rule}', [AlertController::class, 'systemRule'])->where($rule)->name('alert-rules.show');
+    Route::get('/alert-channels', [AlertController::class, 'systemChannels'])->name('alert-channels.index');
+    Route::get('/alert-history', [AlertController::class, 'systemHistory'])->name('alert-history.index');
+    Route::middleware('not-readonly')->group(function () use ($rule, $id) {
+        Route::put('/alert-rules/{rule}', [AlertController::class, 'updateSystemRule'])->where($rule)->name('alert-rules.update');
+        Route::post('/alert-channels', [AlertController::class, 'storeSystemChannel'])->name('alert-channels.store');
+        Route::put('/alert-channels/{id}', [AlertController::class, 'updateSystemChannel'])->where($id)->name('alert-channels.update');
+        Route::delete('/alert-channels/{id}', [AlertController::class, 'destroySystemChannel'])->where($id)->name('alert-channels.destroy');
+        Route::post('/alert-channels/{id}/test', [AlertController::class, 'testSystemChannel'])->where($id)->name('alert-channels.test');
+    });
+});
+
+// Tasks are the jobs of the Job Center since E15 (spec §7.1)
+Route::get('/tasks', [TaskController::class, 'all'])->defaults('api_area', 'backup')->name('tasks.index');
+Route::middleware('not-readonly')->group(function () {
+    Route::post('/tasks/{id}/cancel', [TaskController::class, 'cancel'])->where('id', '[A-Za-z0-9:._-]+')->defaults('api_area', 'backup')->name('tasks.cancel');
+    Route::post('/tasks/{id}/retry', [TaskController::class, 'retry'])->where('id', '[A-Za-z0-9:._-]+')->defaults('api_area', 'backup')->name('tasks.retry');
+});
 Route::get('/tasks/{id}', [TaskController::class, 'show'])->where('id', '.+')->defaults('api_area', 'backup')->name('tasks.show');
 Route::get('/system/tasks', [TaskController::class, 'system'])->defaults('api_area', 'backup')->name('system.tasks.index');
 
@@ -305,6 +342,30 @@ Route::middleware('effective-user')->group(function () {
         Route::delete('/users/{user}/auth-logs', [LogController::class, 'destroyLogins'])->name('auth-logs.destroy');
         Route::post('/users/{user}/ssh-keys', [SshKeyController::class, 'store'])->name('ssh-keys.store');
         Route::delete('/users/{user}/ssh-keys/{id}', [SshKeyController::class, 'destroy'])->where('id', '.{1,255}')->name('ssh-keys.destroy');
+    });
+
+    // Alerts of an account (E16 spec §8)
+    Route::get('/users/{user}/alerts', [AlertController::class, 'open'])->name('users.alerts.index');
+    Route::get('/users/{user}/alert-rules', [AlertController::class, 'rules'])->name('alert-rules.index');
+    Route::get('/users/{user}/alert-rules/{rule}', [AlertController::class, 'rule'])->where('rule', '[a-z0-9.-]{1,64}')->name('alert-rules.show');
+    Route::get('/users/{user}/alert-channels', [AlertController::class, 'channels'])->name('alert-channels.index');
+    Route::get('/users/{user}/alert-history', [AlertController::class, 'history'])->name('alert-history.index');
+    Route::middleware('not-readonly')->group(function () {
+        Route::put('/users/{user}/alert-rules/{rule}', [AlertController::class, 'updateRule'])->where('rule', '[a-z0-9.-]{1,64}')->name('alert-rules.update');
+        Route::post('/users/{user}/alert-channels', [AlertController::class, 'storeChannel'])->name('alert-channels.store');
+        Route::put('/users/{user}/alert-channels/{id}', [AlertController::class, 'updateChannel'])->where('id', '\d{14}')->name('alert-channels.update');
+        Route::delete('/users/{user}/alert-channels/{id}', [AlertController::class, 'destroyChannel'])->where('id', '\d{14}')->name('alert-channels.destroy');
+        Route::post('/users/{user}/alert-channels/{id}/test', [AlertController::class, 'testChannel'])->where('id', '\d{14}')->name('alert-channels.test');
+    });
+
+    // Doctor of the domains of an account (E17 spec §6)
+    Route::get('/users/{user}/doctor', [DoctorController::class, 'index'])->name('doctor.index');
+    Route::get('/users/{user}/doctor/{domain}', [DoctorController::class, 'show'])->where('domain', '[^/]*\.[^/]*')->name('doctor.show');
+    Route::middleware('not-readonly')->group(function () {
+        Route::post('/users/{user}/doctor/run', [DoctorController::class, 'runUser'])->name('doctor.run');
+        Route::post('/users/{user}/doctor/{domain}/run', [DoctorController::class, 'runDomain'])->where('domain', '[^/]*\.[^/]*')->name('doctor.domain.run');
+        Route::post('/users/{user}/doctor/{domain}/checks/{check}/fix', [DoctorController::class, 'fixDomain'])
+            ->where(['domain' => '[^/]*\.[^/]*', 'check' => '(web|mail)\.[a-z0-9-]{1,64}'])->name('doctor.fix');
     });
 
     // Secret store of a user (E38 spec §8); {name} is the secret name, with or
@@ -664,9 +725,13 @@ foreach (Route::getRoutes() as $route) {
         // Git Deploy has its own set (E20 D13), before the /web-domains match
         str_contains($uri, '/web-domains/{domain}/deploy') => 'deploy',
         str_contains($uri, '/web-domains') => 'web',
+        // Alerts of an account and of every scope (E16 spec §8); the server's are server
+        str_starts_with($uri, 'api/v2/alerts'), str_starts_with($uri, 'api/v2/users/{user}/alert') => 'alerts',
         str_contains($uri, '/secrets') => 'secrets',
         str_contains($uri, '/buckets'), str_contains($uri, '/s3-keys') => 'storage',
         str_contains($uri, '/malware') => 'security',
+        // The Doctor of an account's domains (E17 spec §6); the server's is server
+        str_starts_with($uri, 'api/v2/users/{user}/doctor') => 'security',
         str_contains($uri, '/dns-zones') => 'dns',
         str_contains($uri, '/mail-domains') => 'mail',
         str_contains($uri, '/databases') => 'db',

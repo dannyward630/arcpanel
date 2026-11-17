@@ -43,6 +43,24 @@
 #   prepare.sh dockerapps         the Docker engine and a web domain with
 #                                 HTTPS for arce2edev (E4); dockerapps-clean
 #                                 removes its apps and the domain again
+#   prepare.sh jobs-failed USER   a failed backup.download job of USER (an
+#                                 archive that does not exist); prints its ID
+#   prepare.sh jobs-queued USER   holds the backup queue with a fake running
+#                                 job of the server and queues a backup of USER;
+#                                 prints its ID; jobs-release ends the hold and
+#                                 cancels what USER still has queued (E15)
+#   prepare.sh alerts-listen PORT a webhook stub on 127.0.0.1:PORT that answers
+#                                 every POST with 200 and counts them;
+#                                 alerts-posts PORT prints the count,
+#                                 alerts-clean USER deletes the channels of
+#                                 USER and of the server named E2E* (E16)
+#   prepare.sh doctor             the web domain e2e-doctor.example of
+#                                 arce2euser with the alias www., a
+#                                 self-signed certificate without it and a
+#                                 Doctor result; DOCTOR_RESOLVER points to
+#                                 TEST-NET so no run asks the internet;
+#                                 doctor-clean deletes the domain and
+#                                 restores the resolver (E17)
 #   prepare.sh backups            a local restic repository (when the server
 #                                 has none), a web domain, ~/tmp/e2e-note.txt,
 #                                 one tar backup and one snapshot for
@@ -105,6 +123,34 @@ delete_users() {
 	"$B/v-delete-user-package" "$BACKUP_PACKAGE" > /dev/null 2>&1 || true
 }
 
+# The jobs of USER (E15) whose TYPE matches REGEX and whose STATUS matches
+# STATUS_REGEX (default: queued or running), newest first
+e2e_jobs() {
+	"$B/v-list-jobs" all json 2> /dev/null | jq -r --arg u "$1" --arg t "${2:-.}" --arg s "${3:-^(queued|running)$}" \
+		'[.[] | select(.USER == $u and (.TYPE | test($t)) and (.STATUS | test($s)))] | sort_by(.ID) | reverse | .[].ID'
+}
+
+# Cancel the queued and running jobs of USER of a type matching REGEX
+e2e_cancel_jobs() {
+	local id
+	for id in $(e2e_jobs "$1" "${2:-.}"); do
+		"$B/v-cancel-job" "$id" e2e > /dev/null 2>&1 || true
+	done
+}
+
+# Wait until job ID has finished (at most 120 s); print its STATUS
+e2e_wait_job() {
+	local i status=''
+	for i in $(seq 1 240); do
+		status=$("$B/v-list-job" "$1" 0 json 2> /dev/null | jq -r .STATUS)
+		case "$status" in
+			succeeded | failed | cancelled) break ;;
+		esac
+		sleep 0.5
+	done
+	echo "$status"
+}
+
 # Backups spec (E7): restic repository, domain, file, one archive, one snapshot
 backups_prepare() {
 	local user=arce2ebackup
@@ -118,7 +164,7 @@ backups_prepare() {
 		"$B/v-add-web-domain" "$user" e2e-backup.example > /dev/null
 	fi
 	runuser -u "$user" -- sh -c "mkdir -p /home/$user/tmp && echo original > /home/$user/tmp/e2e-note.txt"
-	sed -i "/'$user'/d; / $user /d" "$ARCPANEL/data/queue/backup.pipe" 2> /dev/null || true
+	e2e_cancel_jobs "$user" '^(backup|restore)\.'
 	for backup in $("$B/v-list-user-backups" "$user" plain | awk '{print $1}'); do
 		"$B/v-delete-user-backup" "$user" "$backup" > /dev/null 2>&1 || true
 	done
@@ -276,6 +322,8 @@ appprocesses_prepare() {
 # Object storage (E44): the developer package gets OBJECT_STORAGE='yes',
 # 3 buckets and 300 MB; the keys it had are restored by the clean step.
 OBJSTORE_STATE=/root/.arcpanel-e2e-objstore
+OBJSTORE_SECRET=/e2e/s3-deploy
+OBJSTORE_ENDPOINT=e2e-s3.example
 
 objectstorage_reset() {
 	local bucket key
@@ -288,6 +336,22 @@ objectstorage_reset() {
 	for bucket in $("$B/v-list-user-buckets" arce2edev json 2> /dev/null | jq -r 'keys[]'); do
 		"$B/v-delete-user-bucket" arce2edev "$bucket" > /dev/null 2>&1 || true
 	done
+	# The secret the spec saves with an S3 key (save_as)
+	"$B/v-delete-user-secret" arce2edev "$OBJSTORE_SECRET" yes > /dev/null 2>&1 || true
+	# The endpoint the spec publishes, only when it is still the spec's
+	if [ "$(grep "^SILO_HOSTNAME=" "$ARCPANEL/conf/arcpanel.conf" | cut -d"'" -f2)" = "$OBJSTORE_ENDPOINT" ]; then
+		"$B/v-change-sys-silo-endpoint" none > /dev/null 2>&1 || true
+	fi
+	if "$B/v-list-web-domain" "$(objectstorage_root_user)" "$OBJSTORE_ENDPOINT" > /dev/null 2>&1; then
+		"$B/v-delete-web-domain" "$(objectstorage_root_user)" "$OBJSTORE_ENDPOINT" no > /dev/null 2>&1 || true
+	fi
+}
+
+# The administrator that owns the endpoint domain (ROOT_USER of arcpanel.conf)
+objectstorage_root_user() {
+	local user
+	user=$(grep "^ROOT_USER=" "$ARCPANEL/conf/arcpanel.conf" | cut -d"'" -f2)
+	echo "${user:-admin}"
 }
 
 objectstorage_prepare() {
@@ -455,11 +519,7 @@ deploy_prepare() {
 		echo "e2e release $n" > "$dir/index.html"
 		tar -czf "$dir/$n.tar.gz" -C "$dir" index.html
 		task=$("$B/v-schedule-web-domain-deploy" arce2euser "$DEPLOY_DOMAIN" --artifact "$dir/$n.tar.gz")
-		for i in $(seq 1 120); do
-			status=$(grep -o "STATUS='[a-z]*'" "$ARCPANEL/data/users/arce2euser/tasks/$task.conf" | cut -d"'" -f2)
-			[ "$status" = succeeded ] || [ "$status" = failed ] && break
-			sleep 0.5
-		done
+		status=$(e2e_wait_job "$task")
 		# Release ids are seconds apart
 		sleep 1
 	done
@@ -648,12 +708,15 @@ if (preg_match('#^/file/(\d+)#', $path, $m)) {
 PHP
 		cd "$dir" || exit 1
 		PHP_CLI_SERVER_WORKERS=8 setsid nohup "$ARCPANEL/php/bin/php" -S "127.0.0.1:$port" router.php > /dev/null 2>&1 < /dev/null &
+		# Ready when the port answers as this server: another listener on the
+		# port (a stub of another spec) would serve every download instead
 		for _ in $(seq 1 25); do
-			if ss -Hltn "sport = :$port" | grep -q .; then
+			if [ "$(curl -s --noproxy '*' --max-time 2 "http://127.0.0.1:$port/file/3")" = aaa ]; then
 				exit 0
 			fi
 			sleep 0.2
 		done
+		echo "fetch-listen: 127.0.0.1:$port does not answer as the fixture server (port taken?)" >&2
 		exit 1
 		;;
 	fetch-clean)
@@ -741,7 +804,7 @@ PHP
 		exit 0
 		;;
 	backups-clear-queue)
-		sed -i "/'arce2ebackup'/d; / arce2ebackup /d" "$ARCPANEL/data/queue/backup.pipe" 2> /dev/null || true
+		e2e_cancel_jobs arce2ebackup '^(backup|restore)\.'
 		exit 0
 		;;
 	backups-change-file)
@@ -749,11 +812,9 @@ PHP
 		exit 0
 		;;
 	backups-run-queue)
-		# The queued file restore of arce2ebackup, run as v-update-sys-queue would
-		file=$(mktemp)
-		grep "v-restore-file-restic 'arce2ebackup' " "$ARCPANEL/data/queue/backup.pipe" > "$file" || true
-		bash "$file" > /dev/null 2>&1 || true
-		rm -f "$file"
+		# The file restore of arce2ebackup is a restore.file job (E15): wait for it
+		task=$(e2e_jobs arce2ebackup '^restore\.file$' '.' | head -n1)
+		[ -n "$task" ] && e2e_wait_job "$task" > /dev/null
 		cat /home/arce2ebackup/tmp/e2e-note.txt
 		exit 0
 		;;
@@ -785,6 +846,96 @@ PHP
 		;;
 	reset-clean)
 		reset_clean
+		exit 0
+		;;
+	alerts-listen)
+		port="${2:?port}"
+		dir="/tmp/arce2e-listen-alerts-$port"
+		mkdir -p "$dir"
+		cat > "$dir/router.php" << 'PHP'
+<?php
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+	file_put_contents(__DIR__ . '/posts.log', "post\n", FILE_APPEND);
+}
+echo 'ok';
+PHP
+		cd "$dir" || exit 1
+		setsid nohup "$ARCPANEL/php/bin/php" -S "127.0.0.1:$port" router.php > /dev/null 2>&1 < /dev/null &
+		for _ in $(seq 1 25); do
+			if [ "$(curl -s --noproxy '*' --max-time 2 "http://127.0.0.1:$port/")" = ok ]; then
+				exit 0
+			fi
+			sleep 0.2
+		done
+		echo "alerts-listen: 127.0.0.1:$port does not answer as the webhook stub (port taken?)" >&2
+		exit 1
+		;;
+	alerts-posts)
+		wc -l < "/tmp/arce2e-listen-alerts-${2:?port}/posts.log" 2> /dev/null || echo 0
+		exit 0
+		;;
+	alerts-clean)
+		for scope in "${2:?user}" system; do
+			for id in $("$B/v-list-alert-channels" "$scope" json 2> /dev/null | jq -r 'to_entries[] | select(.value.NAME | startswith("E2E")) | .key'); do
+				"$B/v-delete-alert-channel" "$scope" "$id" > /dev/null 2>&1 || true
+			done
+		done
+		exit 0
+		;;
+	doctor)
+		domain=e2e-doctor.example
+		"$B/v-delete-web-domain" arce2euser "$domain" > /dev/null 2>&1 || true
+		"$B/v-add-web-domain" arce2euser "$domain" '' yes "www.$domain" > /dev/null
+		dir=$(mktemp -d)
+		openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj "/CN=$domain" -addext "subjectAltName=DNS:$domain" \
+			-keyout "$dir/$domain.key" -out "$dir/$domain.crt" > /dev/null 2>&1
+		"$B/v-add-web-domain-ssl" arce2euser "$domain" "$dir" > /dev/null
+		rm -rf "$dir"
+		if [ ! -f /root/.arce2e-doctor-resolver ]; then
+			grep -m1 '^DOCTOR_RESOLVER=' "$ARCPANEL/conf/arcpanel.conf" > /root/.arce2e-doctor-resolver || true
+		fi
+		"$B/v-change-sys-config-value" DOCTOR_RESOLVER 192.0.2.1 > /dev/null
+		# NGINX reloads in the background
+		for _ in $(seq 1 40); do
+			timeout 5 openssl s_client -connect "$(domain_ip "$domain"):443" -servername "$domain" < /dev/null 2> /dev/null | grep -q "CN *= *$domain" && break
+			sleep 0.5
+		done
+		"$B/v-run-sys-doctor" arce2euser "$domain" cli now > /dev/null
+		"$B/v-run-sys-doctor" system "" cli now > /dev/null
+		exit 0
+		;;
+	doctor-clean)
+		"$B/v-delete-web-domain" arce2euser e2e-doctor.example > /dev/null 2>&1 || true
+		if [ -f /root/.arce2e-doctor-resolver ]; then
+			if [ -s /root/.arce2e-doctor-resolver ]; then
+				"$B/v-change-sys-config-value" DOCTOR_RESOLVER "$(cut -d\' -f2 /root/.arce2e-doctor-resolver)" > /dev/null
+			else
+				sed -i '/^DOCTOR_RESOLVER=/d' "$ARCPANEL/conf/arcpanel.conf"
+			fi
+			rm -f /root/.arce2e-doctor-resolver
+		fi
+		exit 0
+		;;
+	jobs-failed)
+		id=$("$B/v-schedule-user-backup-download" "${2:?user}" e2e-no-such-archive.tar json 2> /dev/null | jq -r .ID)
+		e2e_wait_job "$id" > /dev/null
+		echo "$id"
+		exit 0
+		;;
+	jobs-queued)
+		# A running backup job of the server with a live runner fills the one
+		# backup slot, so the backup of USER stays queued
+		bash -c 'exec -a arce2e-job-hold sleep 600' > /dev/null 2>&1 &
+		now=$(date +'%F %T')
+		echo "ID='99999999999990' TYPE='backup.user' USER='system' OWNER='system' ACTOR='e2e' OBJECT='e2e-hold' ARGS='e2e hold' STATUS='running' EXIT='' ERROR='' UNIT='' PID='$!' QUEUED='$now' START='$now' END='' HEARTBEAT='$now' ATTEMPTS='1' RETRY_OF='' RESOURCE='' UPDATED='$now'" \
+			> "$ARCPANEL/data/jobs/99999999999990.conf"
+		"$B/v-schedule-user-backup" "${2:?user}" json | jq -r .ID
+		exit 0
+		;;
+	jobs-release)
+		pkill -f arce2e-job-hold 2> /dev/null || true
+		rm -f "$ARCPANEL/data/jobs/99999999999990".*
+		e2e_cancel_jobs "${2:?user}" '^backup\.'
 		exit 0
 		;;
 esac

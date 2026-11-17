@@ -1,0 +1,81 @@
+#!/bin/bash
+# info: show a job and its log (E15)
+# options: ID [OFFSET] [FORMAT]
+#
+# example: v-list-job 17286400001234 0 json
+#
+# This function prints the record of job ID (spec §3.2 of
+# docs/features/specs/2026-11-05-001-e15-job-center-design.md) with CLASS
+# and RETRYABLE of its type, and its log from byte OFFSET (default 0), at
+# most 256 KB per call: LOG holds the chunk, OFFSET the offset of the next
+# call and SIZE the size of the log. A running job whose runner is gone is
+# reaped first. Output and arguments are masked.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+id=$1
+offset=${2:-0}
+format=${3-shell}
+
+# Includes
+# shellcheck source=/etc/arcpanel/arcpanel.conf
+source /etc/arcpanel/arcpanel.conf
+# shellcheck source=/usr/local/arcpanel/func/main.sh
+source $ARCPANEL/func/main.sh
+# shellcheck source=/usr/local/arcpanel/func/job.sh
+source $ARCPANEL/func/job.sh
+# load config file
+source_conf "$ARCPANEL/conf/arcpanel.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'ID [OFFSET] [FORMAT]'
+if ! job_id_valid "$id"; then
+	check_result "$E_INVALID" "invalid job ID :: $id"
+fi
+if ! [[ "$offset" =~ ^[0-9]{1,12}$ ]]; then
+	check_result "$E_INVALID" "invalid offset :: $offset"
+fi
+if ! job_exists "$id"; then
+	check_result "$E_NOTEXIST" "job $id does not exist"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+job_reap_one "$id" > /dev/null 2>&1 || true
+job_read "$id" || check_result "$E_NOTEXIST" "job $id does not exist"
+
+clean=$(mktemp)
+job_log_chunk "$id" "$offset" "$clean"
+next=$JOB_LOG_NEXT
+size=$JOB_LOG_SIZE
+
+retryable=no
+job_type_retryable "${JOB[TYPE]}" && retryable=yes
+json=$(head -n1 "$(job_conf "$id")" | job_mask "$id" | jq -R -c "$JOB_JQ_RECORD" \
+	| jq -c --rawfile log "$clean" --arg class "$(job_type_class "${JOB[TYPE]}")" \
+		--arg retryable "$retryable" --argjson offset "$next" --argjson size "$size" \
+		'. + {CLASS: $class, RETRYABLE: $retryable, LOG: $log, OFFSET: $offset, SIZE: $size}')
+rm -f "$clean"
+
+case "$format" in
+	json) printf '%s\n' "$json" | jq . ;;
+	*)
+		printf '%s\n' "$json" | jq -r 'to_entries[] | select(.key != "LOG") | "\(.key): \(.value)"'
+		echo
+		printf '%s\n' "$json" | jq -j .LOG
+		;;
+esac
+
+#----------------------------------------------------------#
+#                         ArcPanel                         #
+#----------------------------------------------------------#
+
+exit

@@ -72,7 +72,7 @@ info:
     | `sync-dns-cluster` | admin | `v-list-users`, `v-list-sys-config`, `v-list-user`, `v-add-cron-restart-job`, `v-delete-dns-domains-src`, `v-insert-dns-domain`, `v-insert-dns-record`, `v-insert-dns-records`, `v-rebuild-dns-domains`, `v-rebuild-dns-domain`, `v-delete-dns-record`, `v-make-tmp-file`, `v-delete-dns-domain` |
     | `update-dns-records` | user | `v-list-dns-records`, `v-change-dns-record` |
 
-    The sets `v2-accounts` and `v2-apps` and `v2-audit` and `v2-backup` and `v2-cron` and `v2-db` and `v2-deploy` and `v2-dns` and `v2-files` and `v2-mail` and `v2-observe` and `v2-read` and `v2-secrets` and `v2-security` and `v2-server` and `v2-storage` and `v2-web` and `v2-write` belong to REST API v2 (`/api/v2/`, documented in `docs/api/v2/openapi.json`): this API ignores them, so a key with only those sets may run no command here.
+    The sets `v2-accounts` and `v2-alerts` and `v2-apps` and `v2-audit` and `v2-backup` and `v2-cron` and `v2-db` and `v2-deploy` and `v2-dns` and `v2-files` and `v2-mail` and `v2-observe` and `v2-read` and `v2-secrets` and `v2-security` and `v2-server` and `v2-storage` and `v2-web` and `v2-write` belong to REST API v2 (`/api/v2/`, documented in `docs/api/v2/openapi.json`): this API ignores them, so a key with only those sets may run no command here.
   license:
     name: GPL-3.0-or-later
     identifier: GPL-3.0-or-later
@@ -121,6 +121,10 @@ tags:
     description: Docker apps from the catalog, run as the user (E4)
   - name: Quick Install
     description: Quick Install web applications
+  - name: Jobs
+    description: Long operations run as jobs (E15)
+  - name: Alerts
+    description: Alert rules, notification channels and the alert history (E16)
   - name: System
     description: Server configuration, services, packages, updates, logs and searches
   - name: Other
@@ -224,6 +228,59 @@ paths:
             application/json:
               schema:
                 type: object
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-add-alert-channel":
+    post:
+      operationId: v-add-alert-channel
+      tags:
+        - Alerts
+      summary: Add an alert channel to a scope (E16)
+      description: |-
+        This function adds a channel to SCOPE (system or a user) and prints its
+        ID. TYPE is email (TARGET: one to five addresses, separated by commas),
+        telegram (TARGET: the chat id; SECRET_FILE: the bot token), slack, discord
+        or mattermost (SECRET_FILE: the incoming-webhook URL). The secret is read
+        from SECRET_FILE, which is deleted, and stored as /arcpanel/alerts/ID in
+        the secret store of the scope's user (the administrator for system); it
+        is never printed again. The panel channel of a scope exists by itself.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `NAME` | yes |
+        | `arg3` | `TYPE` | yes |
+        | `arg4` | `TARGET` | no |
+        | `arg5` | `SECRET_FILE` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-add-alert-channel"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-add-alert-channel"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
         "204":
           $ref: "#/components/responses/NoContent"
         "400":
@@ -3065,6 +3122,53 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/v-add-reseller-user"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-add-sys-alerts":
+    post:
+      operationId: v-add-sys-alerts
+      tags:
+        - System
+      summary: Set up alerts (E16)
+      description: |-
+        This function prepares a server for alerts: the folder data/alerts/, the
+        panel channel of the server scope, the default rules (written once; spec
+        §9) and the engine's cron line, every minute. The server rules use the
+        panel channel and an email channel to the administrator's contact;
+        BACKUP_REPORT off keeps backup.failed on the panel channel only, and
+        UPGRADE_SEND_EMAIL false does the same for update.result. Every user gets
+        ssl.expiring and backup.failed on its panel channel. The nightly port
+        check loses its notify mode: the ports.orphan rule sends its findings. It
+        is safe to run again and keeps rules an administrator has changed.
+
+        **Arguments:** none.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-add-sys-alerts"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-add-sys-alerts"
       responses:
         "200":
           description: "The output of the command; `OK` for an empty output with legacy authentication."
@@ -6984,6 +7088,166 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/v-backup-users-restic"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-cancel-job":
+    post:
+      operationId: v-cancel-job
+      tags:
+        - Jobs
+      summary: Cancel a job (E15)
+      description: |-
+        This function cancels a queued or running job. A queued job is cancelled
+        at once. A running job is stopped: its systemd unit with systemctl stop
+        (KILL after 10 seconds), or without systemd a TERM to the runner's session
+        and a KILL after 10 seconds. STATUS becomes cancelled and ERROR names
+        ACTOR (default cli). A finished job is refused.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `ID` | yes |
+        | `arg2` | `ACTOR` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-cancel-job"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-cancel-job"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-change-alert-channel":
+    post:
+      operationId: v-change-alert-channel
+      tags:
+        - Alerts
+      summary: Change an alert channel of a scope (E16)
+      description: |-
+        This function changes the name, the switch (yes or no) and, when given,
+        the target of channel ID of SCOPE. A SECRET_FILE replaces the stored token
+        or webhook URL (the file is deleted); an empty or missing SECRET_FILE
+        keeps it. Turning a channel on clears its failure count. The panel channel
+        takes a name and the switch only.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `ID` | yes |
+        | `arg3` | `NAME` | yes |
+        | `arg4` | `ENABLED` | yes |
+        | `arg5` | `TARGET` | no |
+        | `arg6` | `SECRET_FILE` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-change-alert-channel"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-change-alert-channel"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-change-alert-rule":
+    post:
+      operationId: v-change-alert-rule
+      tags:
+        - Alerts
+      summary: Change an alert rule of a scope (E16)
+      description: |-
+        This function writes the line of RULE (a type of the catalog that applies
+        to SCOPE, system or a user) in the scope's rules.conf. Arguments that are
+        not given keep their current value (the catalog default for a rule the
+        scope has no line for); an argument given empty clears the value.
+        WARNING and CRITICAL are the thresholds of metric rules, FOR the minutes
+        the condition must hold, SEVERITY the lowest severity of the events an
+        event rule sends (info, warning or critical), COOLDOWN the minutes between
+        two messages of one open alert, CHANNELS a comma list of channel IDs of
+        the scope and OPTIONS the services or mount points to watch.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `RULE` | yes |
+        | `arg3` | `ENABLED` | yes |
+        | `arg4` | `WARNING` | no |
+        | `arg5` | `CRITICAL` | no |
+        | `arg6` | `FOR` | no |
+        | `arg7` | `SEVERITY` | no |
+        | `arg8` | `COOLDOWN` | no |
+        | `arg9` | `CHANNELS` | no |
+        | `arg10` | `OPTIONS` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-change-alert-rule"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-change-alert-rule"
       responses:
         "200":
           description: "The output of the command; `OK` for an empty output with legacy authentication."
@@ -13119,6 +13383,50 @@ paths:
           $ref: "#/components/responses/InvalidRequest"
         "422":
           $ref: "#/components/responses/Unprocessable"
+  "/api/#v-check-sys-alerts":
+    post:
+      operationId: v-check-sys-alerts
+      tags:
+        - System
+      summary: Run the alert engine (E16)
+      description: |-
+        This function runs from cron every minute. It retries the deliveries of
+        the outbox, evaluates the metric rules of every scope whose interval has
+        passed, reads the new events of data/alerts/events.log, sends the messages
+        that are due and appends the history. A run that takes longer than 50
+        seconds leaves the remaining rule types to the next run. A run that finds
+        another one running exits.
+
+        **Arguments:** none.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-check-sys-alerts"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-check-sys-alerts"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
   "/api/#v-check-sys-app-processes":
     post:
       operationId: v-check-sys-app-processes
@@ -14171,6 +14479,52 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/v-delete-access-key"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-delete-alert-channel":
+    post:
+      operationId: v-delete-alert-channel
+      tags:
+        - Alerts
+      summary: Delete an alert channel of a scope (E16)
+      description: |-
+        This function deletes channel ID of SCOPE with its secret, removes it from
+        the rules of the scope and drops its waiting deliveries. The panel channel
+        cannot be deleted.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `ID` | yes |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-delete-alert-channel"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-delete-alert-channel"
       responses:
         "200":
           description: "The output of the command; `OK` for an empty output with legacy authentication."
@@ -20290,6 +20644,59 @@ paths:
           $ref: "#/components/responses/InvalidRequest"
         "422":
           $ref: "#/components/responses/Unprocessable"
+  "/api/#v-fix-sys-doctor":
+    post:
+      operationId: v-fix-sys-doctor
+      tags:
+        - System
+      summary: Fix a failing Doctor check (E17)
+      description: |-
+        This function runs the Doctor check CHECK again
+        (docs/features/specs/2026-11-05-003-e17-doctor-design.md §3.3) for the
+        server (SCOPE system) or for DOMAIN of the user SCOPE. When it still does
+        not pass and names a fix, a job of type doctor.fix (E15) starts that runs
+        the fix command (only a command of the check's allow-list), then the
+        check again, and the job ID is printed; the result file gets the new
+        result when the fix succeeded. A check that passes, or that has no fix,
+        answers E_EXISTS. ACTOR is who asked (a panel login or api:KEY).
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `CHECK` | yes |
+        | `arg3` | `DOMAIN` | no |
+        | `arg4` | `ACTOR` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-fix-sys-doctor"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-fix-sys-doctor"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
   "/api/#v-generate-api-key":
     post:
       operationId: v-generate-api-key
@@ -21401,6 +21808,211 @@ paths:
           $ref: "#/components/responses/InvalidRequest"
         "422":
           $ref: "#/components/responses/Unprocessable"
+  "/api/#v-list-alert-channels":
+    post:
+      operationId: v-list-alert-channels
+      tags:
+        - Alerts
+      summary: List the alert channels of a scope (E16)
+      description: |-
+        This function prints the channels of SCOPE (system or a user), keyed by
+        ID: NAME, TYPE, TARGET, ENABLED, STATUS (ok or the last delivery error),
+        LAST_SENT, FAILS (failures in a row) and SECRET_SET (yes when a token or
+        webhook URL is stored). Secrets are never printed. The scope's panel
+        channel is created when it is missing.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `FORMAT` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-list-alert-channels"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-list-alert-channels"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-list-alert-history":
+    post:
+      operationId: v-list-alert-history
+      tags:
+        - Alerts
+      summary: List the alert history (E16)
+      description: |-
+        This function prints the history lines of SCOPE (system, a user, or all
+        for every scope: the panel's index alerts_history is built from it) whose
+        time is at or after SINCE (YYYY-MM-DD HH:MM:SS or YYYY-MM-DD; default the
+        whole history), oldest first. Each line is one fired, raised, reminded,
+        resolved or closed alert, one event, one retried delivery or one test,
+        with its deliveries.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `SINCE` | no |
+        | `arg3` | `FORMAT` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-list-alert-history"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-list-alert-history"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-list-alert-rules":
+    post:
+      operationId: v-list-alert-rules
+      tags:
+        - Alerts
+      summary: List the alert rules of a scope (E16)
+      description: |-
+        This function prints one entry per rule type of the catalog that applies
+        to SCOPE (system or a user), keyed by RULE: its line of rules.conf, or the
+        catalog default with ENABLED no when the scope has none. KIND, TITLE,
+        UNIT, LEVELS (the thresholds the rule takes) and INTERVAL (minutes) come
+        from the catalog.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `FORMAT` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-list-alert-rules"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-list-alert-rules"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-list-alerts":
+    post:
+      operationId: v-list-alerts
+      tags:
+        - Alerts
+      summary: List the open alerts of a scope (E16)
+      description: |-
+        This function prints the open (fired, not yet resolved) metric alerts of
+        SCOPE (system, a user, or all for every scope), keyed by ID: RULE,
+        TITLE, SCOPE, OBJECT, SEVERITY, VALUE, DETAIL, SINCE (condition first
+        seen), FIRED, LAST_NOTIFIED and COUNT (messages sent).
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `FORMAT` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-list-alerts"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-list-alerts"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
   "/api/#v-list-api":
     post:
       operationId: v-list-api
@@ -21724,6 +22336,8 @@ paths:
         This function shows the last task started with v-start-app-process-task:
         its id, domain, process, task, STATUS (running, done or failed), exit
         code and times. A running task whose process is gone is shown as failed.
+        Since E15 it reads the newest app-process.* job of USER; deprecated in
+        3.0.0 (read the job with v-list-job), removed in 3.1.
 
         **Arguments**
 
@@ -23338,7 +23952,9 @@ paths:
         ACTION, ARGS, STATUS, EXIT, START, END) and its output after byte OFFSET
         (default 0, at most 256 KB) with the next OFFSET. STATUS is running, done
         or failed; a running task whose process is gone is reported, and stored,
-        as failed. Without a task, STATUS is empty.
+        as failed. Without a task, STATUS is empty. Since E15 it reads the newest
+        docker.* job of the app; deprecated in 3.0.0 (read the job with
+        v-list-job), removed in 3.1.
 
         **Arguments**
 
@@ -23910,6 +24526,109 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/v-list-fs-fetches"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-list-job":
+    post:
+      operationId: v-list-job
+      tags:
+        - Jobs
+      summary: Show a job and its log (E15)
+      description: |-
+        This function prints the record of job ID (spec §3.2 of
+        docs/features/specs/2026-11-05-001-e15-job-center-design.md) with CLASS
+        and RETRYABLE of its type, and its log from byte OFFSET (default 0), at
+        most 256 KB per call: LOG holds the chunk, OFFSET the offset of the next
+        call and SIZE the size of the log. A running job whose runner is gone is
+        reaped first. Output and arguments are masked.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `ID` | yes |
+        | `arg2` | `OFFSET` | no |
+        | `arg3` | `FORMAT` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-list-job"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-list-job"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-list-jobs":
+    post:
+      operationId: v-list-jobs
+      tags:
+        - Jobs
+      summary: List jobs (E15)
+      description: |-
+        This function prints every job whose UPDATED is at or after SINCE
+        (YYYY-MM-DD HH:MM:SS or YYYY-MM-DD; default all), keyed by ID, with CLASS
+        and RETRYABLE of its type. The panel's job index (arcpanel:jobs-sync) is
+        built from it. ARGS is masked; logs are read with v-list-job.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SINCE` | no |
+        | `arg2` | `FORMAT` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-list-jobs"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-list-jobs"
       responses:
         "200":
           description: "The output of the command; `OK` for an empty output with legacy authentication."
@@ -26096,7 +26815,8 @@ paths:
         EXIT, START, END) and its output after byte OFFSET (default 0, at most
         256 KB) with the next OFFSET. STATUS is running, done or failed; a running
         task whose process is gone is reported as failed. Without a task, STATUS
-        is empty.
+        is empty. Since E15 it reads the newest docker.engine job; deprecated in
+        3.0.0 (read the job with v-list-job), removed in 3.1.
 
         **Arguments**
 
@@ -26113,6 +26833,61 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/v-list-sys-docker-task"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-list-sys-doctor":
+    post:
+      operationId: v-list-sys-doctor
+      tags:
+        - System
+      summary: List the Doctor results (E17)
+      description: |-
+        This function prints the stored results of v-run-sys-doctor
+        (docs/features/specs/2026-11-05-003-e17-doctor-design.md §3.2): SCOPE
+        system the server checks, a user with DOMAIN the checks of that domain
+        (checked_at, score and checks: id, status, title, message, value, docs,
+        fix, link). A user without DOMAIN, or all for every user, prints the
+        summary of each domain (user, domain, checked_at, score, fail, warn,
+        failing), worst score first. A scope that never ran prints an empty
+        result.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `DOMAIN` | no |
+        | `arg3` | `FORMAT` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-list-sys-doctor"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-list-sys-doctor"
       responses:
         "200":
           description: "The output of the command; `OK` for an empty output with legacy authentication."
@@ -27892,10 +28667,12 @@ paths:
         - System
       summary: Show the current or last system task (E7 batch 3)
       description: |-
-        This function prints the task record (ID, KIND, ARGS, STATUS, EXIT,
-        START, END) and the last LINES lines of its output (default 100, at most
-        1000). STATUS is running, done or failed; a running task whose runner is
-        gone is reported, and stored, as failed. Without a task, STATUS is empty.
+        This function prints the newest job of a sys.KIND type (E15) in the format
+        of the system task record (ID, KIND, ARGS, STATUS, EXIT, START, END) and
+        the last LINES lines of its output (default 100, at most 1000). STATUS is
+        running, done or failed; a running task whose runner is gone is reported,
+        and stored, as failed. Without a task, STATUS is empty.
+        Deprecated in 3.0.0: read the job with v-list-job; removed in 3.1.
 
         **Arguments**
 
@@ -29340,7 +30117,9 @@ paths:
         END) of the scan started by v-start-user-malware-scan and the last LINES
         lines of its output (default 100, at most 1000). STATUS is running, done
         or failed; a running task whose process is gone is reported, and stored,
-        as failed. Without a task, STATUS is empty.
+        as failed. Without a task, STATUS is empty. Since E15 it reads the newest
+        malware.scan job of USER; deprecated in 3.0.0 (read the job with
+        v-list-job), removed in 3.1.
 
         **Arguments**
 
@@ -29395,6 +30174,8 @@ paths:
         START, END) and the last LINES lines of its output (default 100, at most
         1000). STATUS is running, done or failed; a running task whose process is
         gone is reported, and stored, as failed. Without a task, STATUS is empty.
+        Since E15 it reads the newest node.* job of USER; deprecated in 3.0.0
+        (read the job with v-list-job), removed in 3.1.
 
         **Arguments**
 
@@ -29922,6 +30703,8 @@ paths:
         START, END) and the last LINES lines of its output (default 100, at most
         1000). STATUS is running, done or failed; a running task whose process is
         gone is reported, and stored, as failed. Without a task, STATUS is empty.
+        Since E15 it reads the newest quick-install job of USER; deprecated in
+        3.0.0 (read the job with v-list-job), removed in 3.1.
 
         **Arguments**
 
@@ -30232,11 +31015,12 @@ paths:
         - Users
       summary: List the tasks of a user
       description: |-
-        This function prints the queue-task records of USER, newest first, or
-        one record. LOG is the last LINES lines of the task log (default 100,
-        at most 1000). A record that is still queued but whose line is gone
-        from every queue is stored as failed. ATTEMPTS counts the runs of a
-        task that the queue retries.
+        This function prints the queue tasks of USER, newest first, or one task:
+        since E15 the jobs of the backup, restore, letsencrypt and deploy types,
+        in the format of the old records (KIND, ARGS). LOG is the last LINES lines
+        of the job log (default 100, at most 1000). ATTEMPTS counts the runs of a
+        task that the queue retries. Deprecated in 3.0.0 (v-list-job,
+        v-list-jobs); removed in 3.1.
 
         **Arguments**
 
@@ -34546,6 +35330,57 @@ paths:
           $ref: "#/components/responses/InvalidRequest"
         "422":
           $ref: "#/components/responses/Unprocessable"
+  "/api/#v-retry-job":
+    post:
+      operationId: v-retry-job
+      tags:
+        - Jobs
+      summary: Retry a job (E15)
+      description: |-
+        This function starts a new job with the TYPE, USER, OBJECT and command of
+        a failed or cancelled job whose type is retryable, with RETRY_OF=ID and
+        ACTOR (default cli), and prints the new job ID. A job whose concurrency
+        key is held by a queued or running job is refused with E_INUSE.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `ID` | yes |
+        | `arg2` | `ACTOR` | no |
+        | `arg3` | `FORMAT` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-retry-job"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-retry-job"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
   "/api/#v-revoke-api-key":
     post:
       operationId: v-revoke-api-key
@@ -34800,9 +35635,10 @@ paths:
         - App processes
       summary: Run a one-off task of an app process (E42)
       description: |-
-        This function is started by v-start-app-process-task and runs the task in
-        the foreground as the user, appending its output to
-        app-process/logs/task.log of the domain, then records the exit code. COMMAND
+        This function is the command of the app-process.TASK job that
+        v-start-app-process-task starts (E15) and runs the task in the foreground
+        as the user, writing its output to app-process/logs/task.log of the domain
+        (its end is copied to the job log), then exits with its code. COMMAND
         is base64, for the custom task. The task runs in a transient unit in the
         user's slice with the limits of the process (E39 W5 N24), so it shares the
         package's resources and stops with all its children. Not meant to be called
@@ -34812,15 +35648,14 @@ paths:
 
         | Field | Option | Required |
         | --- | --- | --- |
-        | `arg1` | `ID` | yes |
-        | `arg2` | `USER` | yes |
-        | `arg3` | `DOMAIN` | yes |
-        | `arg4` | `NAME` | yes |
-        | `arg5` | `TASK` | yes |
-        | `arg6` | `COMMAND` | no |
+        | `arg1` | `USER` | yes |
+        | `arg2` | `DOMAIN` | yes |
+        | `arg3` | `NAME` | yes |
+        | `arg4` | `TASK` | yes |
+        | `arg5` | `COMMAND` | no |
 
-        **User argument:** with the access key of a user other than the admin, `arg2` must be the key's user.
-      x-arcpanel-user-arg: 2
+        **User argument:** with the access key of a user other than the admin, `arg1` must be the key's user.
+      x-arcpanel-user-arg: 1
       requestBody:
         required: true
         content:
@@ -34965,22 +35800,21 @@ paths:
         - Docker
       summary: Run a Docker app task started by v-start-docker-app-task (E4)
       description: |-
-        This function is the background part of v-start-docker-app-task: it runs
-        the task and records its result. It refuses to run a task that
-        v-start-docker-app-task did not start.
+        This function is the command of the docker.ACTION jobs that
+        v-start-docker-app-task and v-add-docker-app start (E15): it runs the task;
+        the job runner records the result. It refuses to run outside such a job.
 
         **Arguments**
 
         | Field | Option | Required |
         | --- | --- | --- |
-        | `arg1` | `ID` | yes |
-        | `arg2` | `USER` | yes |
-        | `arg3` | `NAME` | yes |
-        | `arg4` | `ACTION` | yes |
-        | `arg5` | `VERSION` | no |
+        | `arg1` | `USER` | yes |
+        | `arg2` | `NAME` | yes |
+        | `arg3` | `ACTION` | yes |
+        | `arg4` | `VERSION` | no |
 
-        **User argument:** with the access key of a user other than the admin, `arg2` must be the key's user.
-      x-arcpanel-user-arg: 2
+        **User argument:** with the access key of a user other than the admin, `arg1` must be the key's user.
+      x-arcpanel-user-arg: 1
       requestBody:
         required: true
         content:
@@ -35043,6 +35877,56 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/v-run-fs-fetch"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-run-job":
+    post:
+      operationId: v-run-job
+      tags:
+        - Jobs
+      summary: Run a job (E15)
+      description: |-
+        This function is the runner of a job, started by job_dispatch in a
+        transient systemd unit (arcpanel-job-ID) or with setsid nohup. It runs the
+        job's command within the time limit of its type, writes its output,
+        masked, to data/jobs/ID.log, refreshes HEARTBEAT every 30 seconds and
+        records STATUS, EXIT, ERROR and END, then calls the finish hooks. A failed
+        job of the backup and letsencrypt queues is queued again until it has run
+        QUEUE_MAX_ATTEMPTS times, unless its command marked the failure final. It
+        refuses a job that job_dispatch did not start.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `ID` | yes |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-run-job"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-run-job"
       responses:
         "200":
           description: "The output of the command; `OK` for an empty output with legacy authentication."
@@ -35170,66 +36054,6 @@ paths:
           $ref: "#/components/responses/InvalidRequest"
         "422":
           $ref: "#/components/responses/Unprocessable"
-  "/api/#v-run-queue-task":
-    post:
-      operationId: v-run-queue-task
-      tags:
-        - System
-      summary: Run a queued command and record its result
-      description: |-
-        This function runs one command that a v-schedule-* script queued. The
-        record must exist and be queued. The command's output is appended to the
-        task log and also written to standard output, so the redirection on the
-        queue line (>> $ARCPANEL/log/backup.log and the others) still receives it.
-
-        When the command fails and its line is still in the pipe, the record is
-        queued again (ERROR, ATTEMPTS) and the next pass of the queue retries it,
-        as the queue did before the records, up to QUEUE_MAX_ATTEMPTS runs
-        (default 3); then the line is removed and the record fails. A failed
-        record carries the reason from its log in ERROR. A line whose record is
-        missing or finished is removed without running anything.
-
-        **Arguments**
-
-        | Field | Option | Required |
-        | --- | --- | --- |
-        | `arg1` | `USER` | yes |
-        | `arg2` | `ID` | yes |
-        | `arg3` | `--` | yes |
-        | `arg4` | `COMMAND` | yes |
-        | `arg5` | `ARG…` | no |
-
-        **User argument:** with the access key of a user other than the admin, `arg1` must be the key's user.
-      x-arcpanel-user-arg: 1
-      requestBody:
-        required: true
-        content:
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: "#/components/schemas/v-run-queue-task"
-          application/json:
-            schema:
-              $ref: "#/components/schemas/v-run-queue-task"
-      responses:
-        "200":
-          description: "The output of the command; `OK` for an empty output with legacy authentication."
-          headers:
-            ArcPanel-Exit-Code:
-              $ref: "#/components/headers/ArcPanel-Exit-Code"
-          content:
-            text/plain:
-              schema:
-                type: string
-        "204":
-          $ref: "#/components/responses/NoContent"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "405":
-          $ref: "#/components/responses/InvalidRequest"
-        "422":
-          $ref: "#/components/responses/Unprocessable"
   "/api/#v-run-sys-arcpanel-autoupdate":
     post:
       operationId: v-run-sys-arcpanel-autoupdate
@@ -35285,16 +36109,15 @@ paths:
         - System
       summary: Run the Docker engine task started by v-start-sys-docker-task (E4)
       description: |-
-        This function is the background part of v-start-sys-docker-task: it runs
-        v-add-sys-docker and records the result. It refuses to run a task that
-        v-start-sys-docker-task did not start.
+        This function is the command of the docker.engine job that
+        v-start-sys-docker-task starts (E15): it runs v-add-sys-docker; the job
+        runner records the result. It refuses to run outside such a job.
 
         **Arguments**
 
         | Field | Option | Required |
         | --- | --- | --- |
-        | `arg1` | `ID` | yes |
-        | `arg2` | `DATA_ROOT` | no |
+        | `arg1` | `DATA_ROOT` | no |
       requestBody:
         required: true
         content:
@@ -35324,6 +36147,63 @@ paths:
           $ref: "#/components/responses/InvalidRequest"
         "422":
           $ref: "#/components/responses/Unprocessable"
+  "/api/#v-run-sys-doctor":
+    post:
+      operationId: v-run-sys-doctor
+      tags:
+        - System
+      summary: Run the Doctor checks of the server or of domains (E17)
+      description: |-
+        This function runs the read-only Doctor checks
+        (docs/features/specs/2026-11-05-003-e17-doctor-design.md): SCOPE system
+        runs the server checks, a user the web and mail checks of every domain of
+        the user (4 domains at a time) or of DOMAIN, all runs everything (the
+        nightly run). Each check has 30 seconds. The results are written to
+        data/doctor/server.json and data/users/USER/doctor/DOMAIN.json and read
+        with v-list-sys-doctor.
+
+        MODE job (default) starts a job of type doctor.run (E15) that runs the
+        checks and prints the job ID; ACTOR is who asked (a panel login, api:KEY,
+        cron). MODE now runs the checks in this process and prints a line per
+        scope or domain.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `DOMAIN` | no |
+        | `arg3` | `ACTOR` | no |
+        | `arg4` | `MODE` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-run-sys-doctor"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-run-sys-doctor"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
   "/api/#v-run-sys-task":
     post:
       operationId: v-run-sys-task
@@ -35331,16 +36211,17 @@ paths:
         - System
       summary: Run a system task started by v-start-sys-task (E7 batch 3)
       description: |-
-        This function is the background part of v-start-sys-task: it runs the
-        steps of the task, prints "$ COMMAND" before each, stops at the first
-        failure and records the result. It refuses to run a task that
-        v-start-sys-task did not start.
+        This function is the command of the sys.KIND jobs that v-start-sys-task
+        starts (E15): it runs the steps of the task, prints "$ COMMAND" before
+        each and stops at the first failure; the job runner records the result.
+        It refuses to run outside such a job.
 
         **Arguments**
 
         | Field | Option | Required |
         | --- | --- | --- |
-        | `arg1` | `ID` | yes |
+        | `arg1` | `KIND` | yes |
+        | `arg2`…`arg13` | `ARG` | no |
       requestBody:
         required: true
         content:
@@ -35377,21 +36258,20 @@ paths:
         - Users
       summary: Run a Node.js task started by v-start-user-node-task (E13)
       description: |-
-        This function is the background part of v-start-user-node-task: it runs
-        the command of the task and records its result. It refuses to run a task
-        that v-start-user-node-task did not start.
+        This function is the command of the node.* jobs that v-start-user-node-task
+        starts (E15): it runs the command of the task; the job runner records the
+        result. It refuses to run outside such a job.
 
         **Arguments**
 
         | Field | Option | Required |
         | --- | --- | --- |
-        | `arg1` | `ID` | yes |
-        | `arg2` | `USER` | yes |
-        | `arg3` | `ACTION` | yes |
-        | `arg4`…`arg13` | `ARGS` | no |
+        | `arg1` | `USER` | yes |
+        | `arg2` | `ACTION` | yes |
+        | `arg3`…`arg13` | `ARGS` | no |
 
-        **User argument:** with the access key of a user other than the admin, `arg2` must be the key's user.
-      x-arcpanel-user-arg: 2
+        **User argument:** with the access key of a user other than the admin, `arg1` must be the key's user.
+      x-arcpanel-user-arg: 1
       requestBody:
         required: true
         content:
@@ -35428,22 +36308,22 @@ paths:
         - Users
       summary: Run a Quick Install started by v-start-user-quick-install (E7 batch 2)
       description: |-
-        This function is the background part of v-start-user-quick-install: it
-        runs v-add-web-domain-app with the staged options, removes them on every
-        exit path and records the result. It refuses to run a task that
-        v-start-user-quick-install did not start.
+        This function is the command of the quick-install jobs that
+        v-start-user-quick-install starts (E15): it runs v-add-web-domain-app with
+        the options of the job's request; the job runner records the result and
+        removes the request when the install succeeds. It refuses to run outside
+        such a job.
 
         **Arguments**
 
         | Field | Option | Required |
         | --- | --- | --- |
-        | `arg1` | `ID` | yes |
-        | `arg2` | `USER` | yes |
-        | `arg3` | `DOMAIN` | yes |
-        | `arg4` | `APP` | yes |
+        | `arg1` | `USER` | yes |
+        | `arg2` | `DOMAIN` | yes |
+        | `arg3` | `APP` | yes |
 
-        **User argument:** with the access key of a user other than the admin, `arg2` must be the key's user.
-      x-arcpanel-user-arg: 2
+        **User argument:** with the access key of a user other than the admin, `arg1` must be the key's user.
+      x-arcpanel-user-arg: 1
       requestBody:
         required: true
         content:
@@ -35486,8 +36366,10 @@ paths:
         one rename, reloads PHP-FPM and the domain's app processes, checks the
         health path (a failure switches back), and prunes old releases. A
         rollback task switches to an existing release. A failed step leaves
-        current where it was. The runner unit started by v-schedule-web-domain-deploy
-        calls it through v-run-queue-task; it is not meant to be called directly.
+        current where it was. It is the command of the deploy.run and
+        deploy.rollback jobs (E15) that v-schedule-web-domain-deploy and
+        v-rollback-web-domain-deploy start, and refuses to run outside such a job;
+        ACTION is archive, pull (VALUE: the ref) or rollback (VALUE: the release).
 
         **Arguments**
 
@@ -35495,7 +36377,8 @@ paths:
         | --- | --- | --- |
         | `arg1` | `USER` | yes |
         | `arg2` | `DOMAIN` | yes |
-        | `arg3` | `TASK` | yes |
+        | `arg3` | `ACTION` | yes |
+        | `arg4` | `VALUE` | no |
 
         **User argument:** with the access key of a user other than the admin, `arg1` must be the key's user.
       x-arcpanel-user-arg: 1
@@ -36473,7 +37356,8 @@ paths:
         One task runs at a time per user, for at most 30 minutes; its output goes
         to app-process/logs/task.log of the domain. After a successful install a
         running process is reloaded. It prints the id of the task; follow it with
-        v-list-app-process-task and v-list-app-process-logs ... task.
+        v-list-app-process-task and v-list-app-process-logs ... task. Since E15
+        the task is a job of type app-process.TASK and the ID is the job ID.
 
         **Arguments**
 
@@ -36764,9 +37648,10 @@ paths:
         - System
       summary: Install the Docker engine in the background (E4)
       description: |-
-        This function starts v-add-sys-docker detached from the caller, for the
-        admin Docker page, and prints the task ID. The state and the output are
-        read with v-list-sys-docker-task. One engine task runs at a time.
+        This function starts v-add-sys-docker as a job of type docker.engine (E15),
+        for the admin Docker page, and prints the job ID. The state and the output
+        are read with v-list-job or v-list-sys-docker-task. One engine task (or
+        system task) runs at a time.
 
         **Arguments**
 
@@ -36809,9 +37694,10 @@ paths:
         - System
       summary: Start a long server operation in the background (E7 batch 3)
       description: |-
-        This function checks a system task and starts v-run-sys-task in a
-        transient systemd unit (arcpanel-sys-task-ID), so the task outlives a
-        restart of the panel, and prints the task ID. One task runs at a time.
+        This function checks a system task and starts it as a job of type
+        sys.KIND (E15) running v-run-sys-task in a transient systemd unit
+        (arcpanel-job-ID), so the task outlives a restart of the panel, and prints
+        the job ID. One system task (or Docker engine task) runs at a time.
         Kinds and arguments:
         php ADD DELETE            PHP versions to install and to remove, comma
         lists or "-"; a version in use by a web domain
@@ -36832,7 +37718,7 @@ paths:
         here, before the task starts
         package SLUG add|delete   v-add-sys-package or v-delete-sys-package of a
         system package of the catalog (E5)
-        The state and the output are read with v-list-sys-task.
+        The state and the output are read with v-list-job or v-list-sys-task.
 
         **Arguments**
 
@@ -36877,9 +37763,9 @@ paths:
       summary: Start a malware scan of a user in the background (E25)
       description: |-
         This function starts a full v-scan-user-web of one web domain, or of every
-        web domain of the user when DOMAIN is empty, detached from the caller, and
-        prints the task ID. One scan per user runs at a time; the state and the
-        output are read with v-list-user-malware-task.
+        web domain of the user when DOMAIN is empty, as a job of type malware.scan
+        (E15), and prints the job ID. One scan per user runs at a time; the state
+        and the output are read with v-list-job or v-list-user-malware-task.
 
         **Arguments**
 
@@ -36931,7 +37817,9 @@ paths:
         (SPEC), add-package (VERSION SPEC), update-packages (VERSION) or
         check-outdated (VERSION), app-install (DOMAIN) or app-build (DOMAIN
         [SCRIPT]) for a Node.js app (E14). A user runs one task at a time; the
-        state and the output are read with v-list-user-node-task.
+        state and the output are read with v-list-job or v-list-user-node-task.
+        Since E15 the task is a job of type node.install, node.npm or node.build
+        (OBJECT node:USER) in the user's slice and the ID is the job ID.
 
         **Arguments**
 
@@ -36980,10 +37868,10 @@ paths:
       summary: Start a Quick Install of an application on a web domain in the background (E7 batch 2)
       description: |-
         This function checks the arguments of a Quick Install, keeps a root-only
-        copy of the options (a JSON object, at most 64 KiB), starts
-        v-add-web-domain-app detached from the caller and prints the task ID. A
-        user runs one install at a time; the state and the output are read with
-        v-list-user-quick-install-task.
+        copy of the options (a JSON object, at most 64 KiB) as the request of a
+        job of type quick-install (E15) that runs v-add-web-domain-app, and prints
+        the job ID. A user runs one install at a time; the state and the output
+        are read with v-list-job or v-list-user-quick-install-task.
 
         **Arguments**
 
@@ -38523,6 +39411,58 @@ paths:
             text/plain:
               schema:
                 type: string
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-test-alert-channel":
+    post:
+      operationId: v-test-alert-channel
+      tags:
+        - Alerts
+      summary: Send a test message to an alert channel (E16)
+      description: |-
+        This function sends a test message to channel ID of SCOPE now, also when
+        the channel is turned off, and prints the result: ok, or the error of the
+        delivery (exit code 15). The channel's STATUS and LAST_SENT are updated;
+        a failed test does not count towards turning the channel off. FORMAT json
+        prints {"RESULT": "ok|failed", "ERROR": "..."}.
+
+        **Arguments**
+
+        | Field | Option | Required |
+        | --- | --- | --- |
+        | `arg1` | `SCOPE` | yes |
+        | `arg2` | `ID` | yes |
+        | `arg3` | `FORMAT` | no |
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-test-alert-channel"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-test-alert-channel"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
         "204":
           $ref: "#/components/responses/NoContent"
         "400":
@@ -40399,7 +41339,9 @@ paths:
         ArcPanel APT repository, or VERSION when given (the repository keeps every
         version, docs/features/specs/2026-10-20-005-e33-update-center-phase-1-design.md
         §6). Valid packages: arcpanel, arcpanel-nginx, arcpanel-php and
-        arcpanel-web-terminal. The output of apt-get is printed.
+        arcpanel-web-terminal. The output of apt-get is printed. It fails when the
+        ArcPanel APT source or its keyring is missing or apt cannot read the
+        repository, rather than report that nothing needs an update.
 
         **Arguments**
 
@@ -40450,7 +41392,9 @@ paths:
         packages only while no newer line is available, and announces a newer line
         to the administrator once per version (panel notification and, with
         UPGRADE_SEND_EMAIL, an e-mail). In auto mode the output goes to
-        $ARCPANEL/log/autoupdate.log and only an error is printed.
+        $ARCPANEL/log/autoupdate.log and only an error is printed. Both modes fail
+        when the ArcPanel APT source or its keyring is missing or apt cannot read the
+        repository; auto mode then also notifies the administrator once.
 
         **Arguments**
 
@@ -40748,6 +41692,49 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/v-update-sys-ip-counters"
+      responses:
+        "200":
+          description: "The output of the command; `OK` for an empty output with legacy authentication."
+          headers:
+            ArcPanel-Exit-Code:
+              $ref: "#/components/headers/ArcPanel-Exit-Code"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          $ref: "#/components/responses/InvalidRequest"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+  "/api/#v-update-sys-jobs":
+    post:
+      operationId: v-update-sys-jobs
+      tags:
+        - System
+      summary: Run the job queue (E15)
+      description: |-
+        This function runs from cron every minute: it reaps running jobs whose
+        runner is gone or silent, imports the task records of the sources that
+        still wait for it (upgrade to 3.0.0), starts the queued jobs that have a
+        free slot and, once an hour, deletes finished jobs older than 30 days and
+        beyond 500 per user. A run that finds another one running exits.
+
+        **Arguments:** none.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/v-update-sys-jobs"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/v-update-sys-jobs"
       responses:
         "200":
           description: "The output of the command; `OK` for an empty output with legacy authentication."
@@ -42564,6 +43551,53 @@ components:
                 - shell
               examples:
                 - json
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-add-alert-channel:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+            - arg2
+            - arg3
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-add-alert-channel
+              default: v-add-alert-channel
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
+            arg2:
+              type: string
+              title: NAME
+              description: "`NAME`"
+              examples:
+                - Ops mail
+            arg3:
+              type: string
+              title: TYPE
+              description: "`TYPE`"
+              examples:
+                - email
+            arg4:
+              type: string
+              title: TARGET
+              description: "`TARGET`, optional"
+              examples:
+                - ops@example.com
+            arg5:
+              type: string
+              title: SECRET_FILE
+              description: "`SECRET_FILE`, optional"
+              examples:
+                - ""
             returncode:
               $ref: "#/components/schemas/ReturnCode"
     v-add-app-process:
@@ -45172,6 +46206,20 @@ components:
                 - Smith
             returncode:
               $ref: "#/components/schemas/ReturnCode"
+    v-add-sys-alerts:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-add-sys-alerts
+              default: v-add-sys-alerts
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
     v-add-sys-api-ip:
       allOf:
         - $ref: "#/components/schemas/Credentials"
@@ -47599,6 +48647,164 @@ components:
               enum:
                 - v-backup-users-restic
               default: v-backup-users-restic
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-cancel-job:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-cancel-job
+              default: v-cancel-job
+            arg1:
+              type: string
+              title: ID
+              description: "`ID`"
+              examples:
+                - "17286400001234"
+            arg2:
+              type: string
+              title: ACTOR
+              description: "`ACTOR`, optional"
+              examples:
+                - alice
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-change-alert-channel:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+            - arg2
+            - arg3
+            - arg4
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-change-alert-channel
+              default: v-change-alert-channel
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
+            arg2:
+              type: string
+              title: ID
+              description: "`ID`"
+              examples:
+                - "17940000001234"
+            arg3:
+              type: string
+              title: NAME
+              description: "`NAME`"
+              examples:
+                - Ops mail
+            arg4:
+              type: string
+              title: ENABLED
+              description: "`ENABLED`"
+              examples:
+                - "yes"
+            arg5:
+              type: string
+              title: TARGET
+              description: "`TARGET`, optional"
+              examples:
+                - ops@example.com
+            arg6:
+              type: string
+              title: SECRET_FILE
+              description: "`SECRET_FILE`, optional"
+              examples:
+                - ""
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-change-alert-rule:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+            - arg2
+            - arg3
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-change-alert-rule
+              default: v-change-alert-rule
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
+            arg2:
+              type: string
+              title: RULE
+              description: "`RULE`"
+              examples:
+                - disk.usage
+            arg3:
+              type: string
+              title: ENABLED
+              description: "`ENABLED`"
+              examples:
+                - "yes"
+            arg4:
+              type: string
+              title: WARNING
+              description: "`WARNING`, optional"
+              examples:
+                - "85"
+            arg5:
+              type: string
+              title: CRITICAL
+              description: "`CRITICAL`, optional"
+              examples:
+                - "95"
+            arg6:
+              type: string
+              title: FOR
+              description: "`FOR`, optional"
+              examples:
+                - "0"
+            arg7:
+              type: string
+              title: SEVERITY
+              description: "`SEVERITY`, optional"
+              examples:
+                - ""
+            arg8:
+              type: string
+              title: COOLDOWN
+              description: "`COOLDOWN`, optional"
+              examples:
+                - "1440"
+            arg9:
+              type: string
+              title: CHANNELS
+              description: "`CHANNELS`, optional"
+              examples:
+                - "12345678901234"
+            arg10:
+              type: string
+              title: OPTIONS
+              description: "`OPTIONS`, optional"
+              examples:
+                - ""
             returncode:
               $ref: "#/components/schemas/ReturnCode"
     v-change-app-process-env:
@@ -52082,6 +53288,20 @@ components:
                 - ""
             returncode:
               $ref: "#/components/schemas/ReturnCode"
+    v-check-sys-alerts:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-check-sys-alerts
+              default: v-check-sys-alerts
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
     v-check-sys-app-processes:
       allOf:
         - $ref: "#/components/schemas/Credentials"
@@ -52737,6 +53957,34 @@ components:
               description: "`ACCESS_KEY_ID`"
               examples:
                 - mykey
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-delete-alert-channel:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+            - arg2
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-delete-alert-channel
+              default: v-delete-alert-channel
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
+            arg2:
+              type: string
+              title: ID
+              description: "`ID`"
+              examples:
+                - "17940000001234"
             returncode:
               $ref: "#/components/schemas/ReturnCode"
     v-delete-app-process:
@@ -56276,6 +57524,46 @@ components:
                 - ""
             returncode:
               $ref: "#/components/schemas/ReturnCode"
+    v-fix-sys-doctor:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+            - arg2
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-fix-sys-doctor
+              default: v-fix-sys-doctor
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
+            arg2:
+              type: string
+              title: CHECK
+              description: "`CHECK`"
+              examples:
+                - server.fail2ban
+            arg3:
+              type: string
+              title: DOMAIN
+              description: "`DOMAIN`, optional"
+              examples:
+                - ""
+            arg4:
+              type: string
+              title: ACTOR
+              description: "`ACTOR`, optional"
+              examples:
+                - admin
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
     v-generate-api-key:
       allOf:
         - $ref: "#/components/schemas/Credentials"
@@ -57039,6 +58327,140 @@ components:
               description: "`USER`, optional"
               examples:
                 - json
+            arg2:
+              type: string
+              title: FORMAT
+              description: "`FORMAT`, optional"
+              enum:
+                - json
+                - plain
+                - csv
+                - shell
+              examples:
+                - json
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-list-alert-channels:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-list-alert-channels
+              default: v-list-alert-channels
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
+            arg2:
+              type: string
+              title: FORMAT
+              description: "`FORMAT`, optional"
+              enum:
+                - json
+                - plain
+                - csv
+                - shell
+              examples:
+                - json
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-list-alert-history:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-list-alert-history
+              default: v-list-alert-history
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
+            arg2:
+              type: string
+              title: SINCE
+              description: "`SINCE`, optional"
+              examples:
+                - "2026-11-06 10:00:00"
+            arg3:
+              type: string
+              title: FORMAT
+              description: "`FORMAT`, optional"
+              enum:
+                - json
+                - plain
+                - csv
+                - shell
+              examples:
+                - json
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-list-alert-rules:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-list-alert-rules
+              default: v-list-alert-rules
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
+            arg2:
+              type: string
+              title: FORMAT
+              description: "`FORMAT`, optional"
+              enum:
+                - json
+                - plain
+                - csv
+                - shell
+              examples:
+                - json
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-list-alerts:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-list-alerts
+              default: v-list-alerts
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
             arg2:
               type: string
               title: FORMAT
@@ -58645,6 +60067,75 @@ components:
                 - json
             returncode:
               $ref: "#/components/schemas/ReturnCode"
+    v-list-job:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-list-job
+              default: v-list-job
+            arg1:
+              type: string
+              title: ID
+              description: "`ID`"
+              examples:
+                - "17286400001234"
+            arg2:
+              type: string
+              title: OFFSET
+              description: "`OFFSET`, optional"
+              examples:
+                - "0"
+            arg3:
+              type: string
+              title: FORMAT
+              description: "`FORMAT`, optional"
+              enum:
+                - json
+                - plain
+                - csv
+                - shell
+              examples:
+                - json
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-list-jobs:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-list-jobs
+              default: v-list-jobs
+            arg1:
+              type: string
+              title: SINCE
+              description: "`SINCE`, optional"
+              examples:
+                - all
+            arg2:
+              type: string
+              title: FORMAT
+              description: "`FORMAT`, optional"
+              enum:
+                - json
+                - plain
+                - csv
+                - shell
+              examples:
+                - json
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
     v-list-letsencrypt-user:
       allOf:
         - $ref: "#/components/schemas/Credentials"
@@ -59909,6 +61400,44 @@ components:
               examples:
                 - "0"
             arg2:
+              type: string
+              title: FORMAT
+              description: "`FORMAT`, optional"
+              enum:
+                - json
+                - plain
+                - csv
+                - shell
+              examples:
+                - json
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-list-sys-doctor:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-list-sys-doctor
+              default: v-list-sys-doctor
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
+            arg2:
+              type: string
+              title: DOMAIN
+              description: "`DOMAIN`, optional"
+              examples:
+                - json
+            arg3:
               type: string
               title: FORMAT
               description: "`FORMAT`, optional"
@@ -64827,6 +66356,44 @@ components:
               default: v-resume-sys-arcpanel-autoupdate
             returncode:
               $ref: "#/components/schemas/ReturnCode"
+    v-retry-job:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-retry-job
+              default: v-retry-job
+            arg1:
+              type: string
+              title: ID
+              description: "`ID`"
+              examples:
+                - "17286400001234"
+            arg2:
+              type: string
+              title: ACTOR
+              description: "`ACTOR`, optional"
+              examples:
+                - alice
+            arg3:
+              type: string
+              title: FORMAT
+              description: "`FORMAT`, optional"
+              enum:
+                - json
+                - plain
+                - csv
+                - shell
+              examples:
+                - json
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
     v-revoke-api-key:
       allOf:
         - $ref: "#/components/schemas/Credentials"
@@ -65001,7 +66568,6 @@ components:
             - arg2
             - arg3
             - arg4
-            - arg5
           properties:
             cmd:
               type: string
@@ -65010,35 +66576,29 @@ components:
               default: v-run-app-process-task
             arg1:
               type: string
-              title: ID
-              description: "`ID`"
-              examples:
-                - "17606214250042"
-            arg2:
-              type: string
               title: USER
               description: "`USER`"
               examples:
                 - alice
-            arg3:
+            arg2:
               type: string
               title: DOMAIN
               description: "`DOMAIN`"
               examples:
                 - shop.example.com
-            arg4:
+            arg3:
               type: string
               title: NAME
               description: "`NAME`"
               examples:
                 - web
-            arg5:
+            arg4:
               type: string
               title: TASK
               description: "`TASK`"
               examples:
                 - migrate
-            arg6:
+            arg5:
               type: string
               title: COMMAND
               description: "`COMMAND`, optional"
@@ -65182,7 +66742,6 @@ components:
             - arg1
             - arg2
             - arg3
-            - arg4
           properties:
             cmd:
               type: string
@@ -65191,29 +66750,23 @@ components:
               default: v-run-docker-app-task
             arg1:
               type: string
-              title: ID
-              description: "`ID`"
-              examples:
-                - "17286400001234"
-            arg2:
-              type: string
               title: USER
               description: "`USER`"
               examples:
                 - alice
-            arg3:
+            arg2:
               type: string
               title: NAME
               description: "`NAME`"
               examples:
                 - status
-            arg4:
+            arg3:
               type: string
               title: ACTION
               description: "`ACTION`"
               examples:
                 - install
-            arg5:
+            arg4:
               type: string
               title: VERSION
               description: "`VERSION`, optional"
@@ -65247,6 +66800,27 @@ components:
               description: "`ID`"
               examples:
                 - "17611234560042"
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-run-job:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-run-job
+              default: v-run-job
+            arg1:
+              type: string
+              title: ID
+              description: "`ID`"
+              examples:
+                - "17286400001234"
             returncode:
               $ref: "#/components/schemas/ReturnCode"
     v-run-node-app-build:
@@ -65311,54 +66885,6 @@ components:
                 - api.example.com
             returncode:
               $ref: "#/components/schemas/ReturnCode"
-    v-run-queue-task:
-      allOf:
-        - $ref: "#/components/schemas/Credentials"
-        - type: object
-          required:
-            - cmd
-            - arg1
-            - arg2
-            - arg3
-            - arg4
-          properties:
-            cmd:
-              type: string
-              enum:
-                - v-run-queue-task
-              default: v-run-queue-task
-            arg1:
-              type: string
-              title: USER
-              description: "`USER`"
-              examples:
-                - admin
-            arg2:
-              type: string
-              title: ID
-              description: "`ID`"
-              examples:
-                - "17280000001234"
-            arg3:
-              type: string
-              title: "--"
-              description: "`--`"
-              examples:
-                - "--"
-            arg4:
-              type: string
-              title: COMMAND
-              description: "`COMMAND`"
-              examples:
-                - /usr/local/arcpanel/bin/v-backup-user
-            arg5:
-              type: string
-              title: "ARG…"
-              description: "`ARG…`, optional"
-              examples:
-                - admin
-            returncode:
-              $ref: "#/components/schemas/ReturnCode"
     v-run-sys-arcpanel-autoupdate:
       allOf:
         - $ref: "#/components/schemas/Credentials"
@@ -65379,7 +66905,6 @@ components:
         - type: object
           required:
             - cmd
-            - arg1
           properties:
             cmd:
               type: string
@@ -65388,14 +66913,47 @@ components:
               default: v-run-sys-docker-task
             arg1:
               type: string
-              title: ID
-              description: "`ID`"
-              examples:
-                - "17286400001234"
-            arg2:
-              type: string
               title: DATA_ROOT
               description: "`DATA_ROOT`, optional"
+              examples:
+                - ""
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-run-sys-doctor:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-run-sys-doctor
+              default: v-run-sys-doctor
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
+            arg2:
+              type: string
+              title: DOMAIN
+              description: "`DOMAIN`, optional"
+              examples:
+                - ""
+            arg3:
+              type: string
+              title: ACTOR
+              description: "`ACTOR`, optional"
+              examples:
+                - ""
+            arg4:
+              type: string
+              title: MODE
+              description: "`MODE`, optional"
               examples:
                 - ""
             returncode:
@@ -65415,10 +66973,82 @@ components:
               default: v-run-sys-task
             arg1:
               type: string
-              title: ID
-              description: "`ID`"
+              title: KIND
+              description: "`KIND`"
               examples:
-                - "17286400001234"
+                - php
+            arg2:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - "8.3"
+            arg3:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - "-"
+            arg4:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - ""
+            arg5:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - ""
+            arg6:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - ""
+            arg7:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - ""
+            arg8:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - ""
+            arg9:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - ""
+            arg10:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - ""
+            arg11:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - ""
+            arg12:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - ""
+            arg13:
+              type: string
+              title: ARG
+              description: "`ARG`, repeatable, optional"
+              examples:
+                - ""
             returncode:
               $ref: "#/components/schemas/ReturnCode"
     v-run-user-node-task:
@@ -65429,7 +67059,6 @@ components:
             - cmd
             - arg1
             - arg2
-            - arg3
           properties:
             cmd:
               type: string
@@ -65438,28 +67067,28 @@ components:
               default: v-run-user-node-task
             arg1:
               type: string
-              title: ID
-              description: "`ID`"
-              examples:
-                - "17286400001234"
-            arg2:
-              type: string
               title: USER
               description: "`USER`"
               examples:
                 - alice
-            arg3:
+            arg2:
               type: string
               title: ACTION
               description: "`ACTION`"
               examples:
                 - add-version
-            arg4:
+            arg3:
               type: string
               title: ARGS
               description: "`ARGS`, repeatable, optional"
               examples:
                 - lts
+            arg4:
+              type: string
+              title: ARGS
+              description: "`ARGS`, repeatable, optional"
+              examples:
+                - ""
             arg5:
               type: string
               title: ARGS
@@ -65525,7 +67154,6 @@ components:
             - arg1
             - arg2
             - arg3
-            - arg4
           properties:
             cmd:
               type: string
@@ -65534,23 +67162,17 @@ components:
               default: v-run-user-quick-install
             arg1:
               type: string
-              title: ID
-              description: "`ID`"
-              examples:
-                - "17286400001234"
-            arg2:
-              type: string
               title: USER
               description: "`USER`"
               examples:
                 - alice
-            arg3:
+            arg2:
               type: string
               title: DOMAIN
               description: "`DOMAIN`"
               examples:
                 - example.com
-            arg4:
+            arg3:
               type: string
               title: APP
               description: "`APP`"
@@ -65587,10 +67209,16 @@ components:
                 - shop.example.com
             arg3:
               type: string
-              title: TASK
-              description: "`TASK`"
+              title: ACTION
+              description: "`ACTION`"
               examples:
-                - "17617400001234"
+                - pull
+            arg4:
+              type: string
+              title: VALUE
+              description: "`VALUE`, optional"
+              examples:
+                - main
             returncode:
               $ref: "#/components/schemas/ReturnCode"
     v-save-fs-file:
@@ -67661,6 +69289,45 @@ components:
                 - ""
             returncode:
               $ref: "#/components/schemas/ReturnCode"
+    v-test-alert-channel:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+            - arg1
+            - arg2
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-test-alert-channel
+              default: v-test-alert-channel
+            arg1:
+              type: string
+              title: SCOPE
+              description: "`SCOPE`"
+              examples:
+                - system
+            arg2:
+              type: string
+              title: ID
+              description: "`ID`"
+              examples:
+                - "17940000001234"
+            arg3:
+              type: string
+              title: FORMAT
+              description: "`FORMAT`, optional"
+              enum:
+                - json
+                - plain
+                - csv
+                - shell
+              examples:
+                - json
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
     v-unsuspend-backup-job:
       allOf:
         - $ref: "#/components/schemas/Credentials"
@@ -68846,6 +70513,20 @@ components:
               description: "`IP`"
               examples:
                 - ""
+            returncode:
+              $ref: "#/components/schemas/ReturnCode"
+    v-update-sys-jobs:
+      allOf:
+        - $ref: "#/components/schemas/Credentials"
+        - type: object
+          required:
+            - cmd
+          properties:
+            cmd:
+              type: string
+              enum:
+                - v-update-sys-jobs
+              default: v-update-sys-jobs
             returncode:
               $ref: "#/components/schemas/ReturnCode"
     v-update-sys-node-releases:

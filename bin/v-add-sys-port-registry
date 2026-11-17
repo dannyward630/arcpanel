@@ -23,7 +23,7 @@ source_conf "$ARCPANEL/conf/arcpanel.conf"
 
 PORTS_DIR="$ARCPANEL/data/ports"
 CRONTAB="/var/spool/cron/crontabs/arcpanelweb"
-CRON_LINE="10 03 * * * sudo /usr/local/arcpanel/bin/v-check-sys-ports notify"
+CRON_LINE="10 03 * * * sudo /usr/local/arcpanel/bin/v-check-sys-ports"
 
 #----------------------------------------------------------#
 #                    Verifications                         #
@@ -68,6 +68,13 @@ fi
 # Nightly reconciliation
 # (sed, not >>: fs.protected_regular forbids root to open another user's
 # file for appending in the sticky crontab directory)
+# Since 3.0 the ports.orphan alert rule (E16) sends the findings: the check
+# runs without notify
+if [ -f "$CRONTAB" ] && grep -q "v-check-sys-ports notify" "$CRONTAB"; then
+	sed -i -e "s#bin/v-check-sys-ports notify#bin/v-check-sys-ports#" "$CRONTAB"
+	chown arcpanelweb:arcpanelweb "$CRONTAB"
+	chmod 600 "$CRONTAB"
+fi
 if [ -f "$CRONTAB" ] && ! grep -q "v-check-sys-ports" "$CRONTAB"; then
 	sed -i -e "\$a$CRON_LINE" "$CRONTAB"
 	chown arcpanelweb:arcpanelweb "$CRONTAB"

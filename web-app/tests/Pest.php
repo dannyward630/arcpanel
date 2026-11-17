@@ -375,6 +375,8 @@ function fakeWebDomains(ArcCommandFake $fake): void
     // Git Deploy of the Deploy tab (E20): off, and allowed by the package
     $fake->on('v-list-web-domain-deploy')->using(fn (array $args) => [0, json_encode([$args[1] => deployRow()])]);
     $fake->on('v-list-web-domain-deploys')->returnsJson(['releases' => [], 'tasks' => []]);
+    // The Doctor tab of the edit page (E17)
+    $fake->on('v-list-sys-doctor')->returnsJson(['checked_at' => null, 'score' => null, 'checks' => []]);
     $fake->on('v-list-sys-deploy')->returnsJson(['DEPLOY_PORT' => '8088', 'DEPLOY_MAX_ARTIFACT' => '512M', 'DEPLOY_BUILD_TIMEOUT' => '900',
         'DEPLOY_OIDC_ISSUERS' => 'https://token.actions.githubusercontent.com,https://gitlab.com', 'DOMAINS' => '0', 'PORT_OPEN' => 'no']);
     $fake->on('v-delete-web-domain-tpl-vars')->returns();
@@ -1032,4 +1034,155 @@ function domainPhpSettingsRow(array $overrides = [], array $settings = []): arra
         ], $settings),
         'WARNINGS' => [],
     ], $overrides);
+}
+
+// Jobs of the Job Center (E15)
+
+/** A job record as v-list-job and v-list-jobs print it */
+function jobRecord(string $id, array $values = []): array
+{
+    return array_merge([
+        'ID' => $id, 'TYPE' => 'backup.user', 'USER' => 'bob', 'OWNER' => 'hostco', 'ACTOR' => 'bob',
+        'OBJECT' => 'user:bob', 'ARGS' => 'v-backup-user bob yes', 'STATUS' => 'succeeded', 'EXIT' => '0', 'ERROR' => '',
+        'UNIT' => 'arcpanel-job-'.$id, 'PID' => '', 'QUEUED' => '2026-10-07 05:00:00', 'START' => '2026-10-07 05:00:01',
+        'END' => '2026-10-07 05:10:00', 'HEARTBEAT' => '', 'ATTEMPTS' => '1', 'RETRY_OF' => '', 'RESOURCE' => '',
+        'UPDATED' => '2026-10-07 05:10:00', 'CLASS' => 'backup', 'RETRYABLE' => 'yes',
+    ], $values);
+}
+
+/**
+ * The jobs of the fixtures: v-list-job of each with its log, and v-list-jobs.
+ *
+ * @param  list<array<string, string>>  $jobs
+ */
+function fakeJobs(ArcCommandFake $fake, array $jobs): void
+{
+    $all = [];
+    foreach ($jobs as $job) {
+        $log = $job['LOG'] ?? '';
+        unset($job['LOG']);
+        $all[$job['ID']] = $job;
+        $fake->on('v-list-job', [$job['ID'], '0', 'json'])->returnsJson($job + ['LOG' => $log, 'OFFSET' => strlen($log), 'SIZE' => strlen($log)]);
+    }
+    $fake->on('v-list-jobs')->returnsJson($all);
+}
+
+/*
+| Alerts (E16): rows of the alert commands for the pages and the API tests
+*/
+
+const ALERT_TOKEN = '123456789:AAbbCCddEEffGGhhIIjjKKllMMnnOOppQQr';
+
+/** @return array<string, array<string, string>> `v-list-alert-rules SCOPE json` */
+function alertRuleRows(string $scope): array
+{
+    $row = fn (string $rule, string $kind, string $title, array $keys = []) => array_replace([
+        'RULE' => $rule, 'KIND' => $kind, 'TITLE' => $title, 'ENABLED' => 'no', 'WARNING' => '', 'CRITICAL' => '', 'FOR' => '0',
+        'SEVERITY' => $kind === 'event' ? 'info' : '', 'COOLDOWN' => '1440', 'CHANNELS' => '17900000000001', 'OPTIONS' => '',
+        'UNIT' => '', 'LEVELS' => 'none', 'INTERVAL' => '1', 'SCOPES' => 'server,user', 'CUSTOM' => 'no',
+    ], $keys);
+    $rules = [
+        'ssl.expiring' => $row('ssl.expiring', 'metric', 'Certificate expiring', ['ENABLED' => 'yes', 'WARNING' => '14', 'CRITICAL' => '3', 'UNIT' => 'days', 'LEVELS' => 'below', 'INTERVAL' => '360', 'CUSTOM' => 'yes']),
+        'backup.failed' => $row('backup.failed', 'event', 'Backup failed', ['ENABLED' => 'yes', 'CUSTOM' => 'yes']),
+    ];
+    if ($scope === 'system') {
+        $rules = ['disk.usage' => $row('disk.usage', 'metric', 'Disk usage', ['ENABLED' => 'yes', 'WARNING' => '90', 'CRITICAL' => '95', 'UNIT' => '%', 'LEVELS' => 'both',
+            'CHANNELS' => '17900000000001,17900000000002', 'SCOPES' => 'server', 'CUSTOM' => 'yes'])] + $rules;
+    }
+
+    return $rules;
+}
+
+/** @return array<string, array<string, string>> `v-list-alert-channels SCOPE json` */
+function alertChannelRows(string $scope): array
+{
+    $rows = ['17900000000001' => ['ID' => '17900000000001', 'NAME' => 'Panel', 'TYPE' => 'panel', 'TARGET' => '', 'ENABLED' => 'yes',
+        'STATUS' => 'ok', 'LAST_SENT' => '2026-11-06 10:00:00', 'FAILS' => '0', 'SECRET_SET' => 'no']];
+    $rows['17900000000002'] = ['ID' => '17900000000002', 'NAME' => 'Ops chat', 'TYPE' => 'telegram', 'TARGET' => '-1001234', 'ENABLED' => 'yes',
+        'STATUS' => 'HTTP 401: Unauthorized', 'LAST_SENT' => '', 'FAILS' => '3', 'SECRET_SET' => 'yes'];
+
+    return $scope === 'carol' ? [] : $rows;
+}
+
+/** @return array<string, array<string, string>> `v-list-alerts SCOPE json` */
+function openAlertRows(string $scope): array
+{
+    $rows = [
+        '17900000000101' => ['ID' => '17900000000101', 'RULE' => 'disk.usage', 'TITLE' => 'Disk usage', 'SCOPE' => 'system', 'OBJECT' => 'mount:/home',
+            'SEVERITY' => 'critical', 'VALUE' => '96% (warning 90%, critical 95%)', 'DETAIL' => '', 'SINCE' => '2026-11-06 09:58:00',
+            'FIRED' => '2026-11-06 09:58:00', 'LAST_NOTIFIED' => '2026-11-06 09:58:00', 'COUNT' => '1'],
+        '17900000000102' => ['ID' => '17900000000102', 'RULE' => 'ssl.expiring', 'TITLE' => 'Certificate expiring', 'SCOPE' => 'bob', 'OBJECT' => 'web:bob.example',
+            'SEVERITY' => 'warning', 'VALUE' => '9 days (warning 14 days, critical 3 days)', 'DETAIL' => '', 'SINCE' => '2026-11-06 06:00:00',
+            'FIRED' => '2026-11-06 06:00:00', 'LAST_NOTIFIED' => '2026-11-06 06:00:00', 'COUNT' => '1'],
+    ];
+
+    return array_filter($rows, fn (array $row) => $scope === 'all' || $row['SCOPE'] === $scope);
+}
+
+/** Alert command fakes of the pages and the API */
+function fakeAlertCommands(ArcCommandFake $fake, array $history = []): void
+{
+    $fake->on('v-list-alert-rules')->using(fn (array $a) => [0, (string) json_encode(alertRuleRows($a[0]))]);
+    $fake->on('v-list-alert-channels')->using(fn (array $a) => [0, (string) json_encode(alertChannelRows($a[0]))]);
+    $fake->on('v-list-alerts')->using(fn (array $a) => [0, (string) json_encode(openAlertRows($a[0]))]);
+    $fake->on('v-list-alert-history')->returnsJson($history);
+}
+
+/** A history line of `v-list-alert-history` */
+function alertLine(string $event, string $id, array $keys = []): array
+{
+    return array_replace(['time' => '2026-11-06 10:00:00', 'event' => $event, 'id' => $id, 'scope' => 'system', 'user' => '', 'owner' => '',
+        'rule' => 'disk.usage', 'object' => 'mount:/home', 'severity' => 'warning', 'value' => '91%', 'message' => '[WARNING] Disk usage: mount:/home on host',
+        'since' => '2026-11-06 09:55:00', 'count' => 1,
+        'deliveries' => [['channel' => '17900000000001', 'name' => 'Panel', 'type' => 'panel', 'result' => 'sent', 'error' => '']]], $keys);
+}
+
+/*
+| Doctor (E17): results of v-list-sys-doctor for the pages and the API tests
+*/
+
+/** A check of a Doctor result. */
+function doctorCheck(string $id, string $status, array $keys = []): array
+{
+    return array_replace(['id' => $id, 'status' => $status, 'title' => 'Title of '.$id, 'message' => 'Message of '.$id,
+        'value' => '', 'docs' => '/docs/guides/doctor#'.str_replace('.', '-', $id), 'fix' => null, 'link' => ''], $keys);
+}
+
+/**
+ * `v-list-sys-doctor` of the fixtures: the server, bob.example of bob (an
+ * alias missing from the certificate), carol.example of carol (not checked
+ * yet); the summaries of bob and carol.
+ */
+function fakeDoctor(ArcCommandFake $fake): void
+{
+    $server = ['checked_at' => '2026-11-06 04:40:12', 'score' => 75, 'checks' => [
+        doctorCheck('server.fail2ban', 'fail', ['message' => 'The Fail2ban service is not running.',
+            'fix' => ['label' => 'Restart Fail2ban', 'command' => 'v-restart-service fail2ban', 'argv' => ['v-restart-service', 'fail2ban']]]),
+        doctorCheck('server.panel-port', 'warn'),
+        doctorCheck('server.time-sync', 'ok'),
+        doctorCheck('server.docker', 'skip'),
+    ]];
+    $bob = ['checked_at' => '2026-11-06 04:41:00', 'score' => 80, 'checks' => [
+        doctorCheck('web.ssl-aliases', 'fail', ['message' => 'www.bob.example is not in the certificate.',
+            'fix' => ['label' => "Request a Let's Encrypt certificate", 'command' => 'v-add-letsencrypt-domain bob bob.example www.bob.example',
+                'argv' => ['v-add-letsencrypt-domain', 'bob', 'bob.example', 'www.bob.example']]]),
+        doctorCheck('web.dns-a', 'ok', ['link' => 'dns']),
+        doctorCheck('mail.dmarc', 'warn'),
+    ]];
+    $empty = ['checked_at' => null, 'score' => null, 'checks' => []];
+    $summary = [
+        'bob' => [['user' => 'bob', 'domain' => 'bob.example', 'checked_at' => '2026-11-06 04:41:00', 'score' => 80, 'fail' => 1, 'warn' => 1, 'failing' => ['web.ssl-aliases']]],
+        'carol' => [['user' => 'carol', 'domain' => 'carol.example', 'checked_at' => null, 'score' => null, 'fail' => 0, 'warn' => 0, 'failing' => []]],
+    ];
+    $fake->on('v-list-sys-doctor')->using(function (array $a) use ($server, $bob, $empty, $summary) {
+        $data = match (true) {
+            $a[0] === 'system' => $server,
+            $a[0] === 'all' => [...$summary['carol'], ...$summary['bob']],
+            count($a) === 3 && $a[0] === 'bob' && $a[1] === 'bob.example' => $bob,
+            count($a) === 3 => $empty,
+            default => $summary[$a[0]] ?? [],
+        };
+
+        return [0, (string) json_encode($data)];
+    });
 }

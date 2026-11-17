@@ -45,6 +45,13 @@ case "$key" in
 			check_result "$E_INVALID" "invalid audit syslog :: $value (yes or no)"
 		fi
 		;;
+	DOCTOR_RESOLVER)
+		# E17 D5: a resolver address, or system for the server's resolver
+		if [ "$value" != 'system' ] && ! [[ "$value" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] \
+			&& ! [[ "$value" =~ ^[0-9A-Fa-f:]+$ && "$value" == *:* ]]; then
+			check_result "$E_INVALID" "invalid Doctor resolver :: $value (an IP address or system)"
+		fi
+		;;
 esac
 #----------------------------------------------------------#
 #                       Action                             #
@@ -68,6 +75,14 @@ if [ "$key" = 'BACKUP' ]; then
 	if [ "$PANEL_PHP_CHANGED" = yes ]; then
 		panel_php_reload
 	fi
+fi
+
+# The aliases of 3.0 (E16 spec §9): the old mail switches change the
+# administrator's email channel of their alert rule
+if [ "$key" = 'BACKUP_REPORT' ] || [ "$key" = 'UPGRADE_SEND_EMAIL' ]; then
+	# shellcheck source=/usr/local/arcpanel/func/alerts.sh
+	source "$ARCPANEL/func/alerts.sh"
+	alerts_config_alias "$key" "$value"
 fi
 
 #----------------------------------------------------------#

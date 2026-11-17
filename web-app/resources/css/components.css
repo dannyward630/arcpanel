@@ -510,6 +510,13 @@
 	opacity: 0.45;
 	cursor: not-allowed;
 }
+/* A posted form waits for its answer (submit-busy.js): the spinner takes the icon's place */
+.ap-btn[aria-busy="true"] > .ic {
+	display: none;
+}
+.ap-btn[aria-busy="true"] {
+	pointer-events: none;
+}
 .ap-spinner {
 	width: 15px;
 	height: 15px;
@@ -1177,6 +1184,19 @@
 .ap-list > li:last-child {
 	border-bottom: 0;
 }
+/* The date or value beside the text of a row keeps its line (dashboard notifications) */
+.ap-list > li > .ap-list-main + .mono {
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+/* Doctor checks: the actions keep one width, so Docs lines up in every row */
+@media (min-width: 768px) {
+	.ap-doctor-checks > li > .ap-row {
+		flex-shrink: 0;
+		justify-content: flex-start;
+		min-width: 13rem;
+	}
+}
 .ap-list > li.ap-list-item {
 	flex-direction: column;
 	align-items: flex-start;
@@ -1440,8 +1460,14 @@
 
 .ap-pager {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: var(--ap-space-1);
+}
+.ap-pager-gap {
+	min-width: 20px;
+	color: var(--ap-fg-subtle);
+	text-align: center;
 }
 .ap-pager button {
 	min-width: 32px;
@@ -1616,6 +1642,10 @@
 .ap-modal-head p {
 	margin-top: var(--ap-space-1);
 	color: var(--ap-fg-muted);
+}
+/* A dialog without a body (apConfirm): room between the text and the actions */
+.ap-modal-head + .ap-modal-foot {
+	margin-top: var(--ap-space-5);
 }
 .ap-modal-body {
 	padding: var(--ap-space-4) var(--ap-space-5);
@@ -2697,21 +2727,32 @@ a.ap-pick:focus-visible {
 		padding: var(--ap-space-3-5) var(--ap-space-4);
 		border-bottom: 1px solid var(--ap-border);
 	}
+	/* The label on the left, the parts of the value together on the right
+	   (wrapping below it when they do not fit), not spread over the row */
 	.ap-table-cards tbody td {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
-		justify-content: space-between;
-		gap: var(--ap-space-3);
+		justify-content: flex-end;
+		gap: var(--ap-space-1) var(--ap-space-3);
 		height: auto;
 		padding: 0;
 		border: 0;
 		grid-column: 1 / -1;
+		text-align: end;
+		overflow-wrap: anywhere;
+	}
+	.ap-table-cards tbody td > * {
+		min-width: 0;
+		max-width: 100%;
 	}
 	.ap-table-cards tbody td[data-label]::before {
 		content: attr(data-label);
+		margin-inline-end: auto;
 		font: 500 11px/1 var(--ap-font-mono);
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
+		text-align: start;
 		color: var(--ap-fg-subtle);
 	}
 	.ap-table-cards .col-check {
@@ -2725,6 +2766,7 @@ a.ap-pick:focus-visible {
 		min-height: 32px;
 		font-size: var(--ap-text-md);
 		font-weight: 500;
+		text-align: start;
 	}
 	.ap-table-cards tbody td:is(.col-check + td, :first-child:not(.col-check))::before {
 		content: none;
@@ -3359,6 +3401,264 @@ a.ap-pick:focus-visible {
 	gap: var(--ap-space-2);
 	padding-top: var(--ap-space-2);
 }
+
+/* ---------- Long forms (packages): sections, feature cards, save bar ---------- */
+
+.ap-form-layout {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: var(--ap-space-5);
+	align-items: start;
+}
+.ap-form-sections {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ap-space-5);
+	min-width: 0;
+}
+.ap-form-sections > [id] {
+	scroll-margin-top: calc(var(--ap-topbar-h) + var(--ap-space-4));
+}
+.ap-form-grid-3 {
+	grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+}
+.ap-form-grid-2 {
+	grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+}
+.ap-card-lead {
+	margin: 0;
+	color: var(--ap-fg-muted);
+	font-size: var(--ap-text-sm);
+}
+.ap-subhead {
+	padding: 0;
+	margin-bottom: var(--ap-space-2);
+	font-weight: 600;
+	font-size: var(--ap-text-md);
+	color: var(--ap-fg);
+}
+.ap-form-sections .ap-fieldset {
+	gap: var(--ap-space-3);
+}
+.ap-form-sections .ap-fieldset + .ap-fieldset {
+	margin-top: var(--ap-space-2);
+}
+.ap-settings-split {
+	padding-top: var(--ap-space-4);
+	border-top: 1px solid var(--ap-border);
+}
+
+/* In-page links: a row above the form, a column beside it on wide screens */
+.ap-section-nav ul {
+	display: flex;
+	gap: var(--ap-space-1);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+.ap-section-nav a {
+	display: flex;
+	align-items: center;
+	min-height: 36px;
+	padding: 0 var(--ap-space-3);
+	border-radius: var(--ap-radius-md);
+	color: var(--ap-fg-muted);
+	font-size: var(--ap-text-sm);
+	white-space: nowrap;
+	text-decoration: none;
+	transition:
+		background var(--ap-duration-fast) var(--ap-ease),
+		color var(--ap-duration-fast) var(--ap-ease);
+}
+.ap-section-nav a:hover {
+	background: var(--ap-surface-hover);
+	color: var(--ap-fg);
+}
+.ap-section-nav a[aria-current="true"] {
+	background: var(--ap-accent-subtle);
+	color: var(--ap-fg);
+	font-weight: 500;
+}
+@media (min-width: 1200px) {
+	.ap-form-layout {
+		grid-template-columns: 184px minmax(0, 1fr);
+	}
+	.ap-section-nav {
+		position: sticky;
+		top: calc(var(--ap-topbar-h) + var(--ap-space-4));
+	}
+	.ap-section-nav ul {
+		flex-direction: column;
+		overflow: visible;
+	}
+	.ap-section-nav a {
+		min-height: 34px;
+		border-inline-start: 2px solid transparent;
+		border-radius: 0 var(--ap-radius-md) var(--ap-radius-md) 0;
+	}
+	.ap-section-nav a[aria-current="true"] {
+		border-inline-start-color: var(--ap-accent);
+	}
+}
+
+/* Feature card: the switch in the head, the settings greyed out while off */
+.ap-feature-switch {
+	gap: var(--ap-space-2-5);
+}
+.ap-feature-state {
+	min-width: 2.5em;
+	text-align: end;
+	color: var(--ap-fg-muted);
+	font-size: var(--ap-text-sm);
+}
+.ap-feature-text {
+	margin: 0;
+	color: var(--ap-fg-muted);
+	font-size: var(--ap-text-sm);
+}
+.ap-feature-body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ap-space-4-5);
+	transition: opacity var(--ap-duration-base) var(--ap-ease);
+}
+.ap-feature-body.is-off {
+	opacity: 0.45;
+	user-select: none;
+}
+
+/* Number with a unit select */
+.ap-input-group > .ap-unit {
+	flex: none;
+}
+.ap-input-group > .ap-unit .ap-select {
+	width: auto;
+	min-width: 76px;
+	border-start-start-radius: 0;
+	border-end-start-radius: 0;
+	background-color: var(--ap-surface-raised);
+}
+.ap-unlimited > .ap-input-group {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+.ap-unlimited > .ap-check {
+	flex: none;
+}
+
+/* The save bar of a long form, kept in view at the bottom of the window */
+.ap-form-bar {
+	position: sticky;
+	bottom: var(--ap-space-4);
+	z-index: 15;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--ap-space-3);
+	padding: var(--ap-space-3) var(--ap-space-4);
+	border: 1px solid var(--ap-border-strong);
+	border-radius: var(--ap-radius-lg);
+	background: var(--ap-surface-raised);
+	box-shadow: var(--ap-shadow-2);
+}
+.ap-form-bar-state {
+	margin: 0;
+	min-height: 1lh;
+	color: var(--ap-fg-muted);
+	font-size: var(--ap-text-sm);
+}
+.ap-form-bar-dirty {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--ap-space-2);
+	color: var(--ap-fg);
+}
+.ap-form-bar .ap-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--ap-warn);
+}
+.ap-form-bar-actions {
+	display: flex;
+	gap: var(--ap-space-2);
+	margin-inline-start: auto;
+}
+/* Toasts above the save bar, so they do not cover its buttons */
+body:has([data-form-bar]) .ap-toast-region {
+	bottom: calc(var(--ap-control-h) + var(--ap-space-9));
+}
+@media (max-width: 639px) {
+	.ap-form-bar {
+		bottom: var(--ap-space-2);
+		padding: var(--ap-space-2-5) var(--ap-space-3);
+	}
+	/* No empty line above the buttons while nothing changed */
+	.ap-form-bar:not(.is-dirty) > .ap-form-bar-state {
+		display: none;
+	}
+	.ap-form-bar-actions {
+		flex: 1 1 100%;
+	}
+	.ap-form-bar-actions > .ap-btn {
+		flex: 1 1 0;
+		justify-content: center;
+	}
+}
+.ap-row-actions {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--ap-space-1);
+}
+.ap-btn-ghost.is-danger {
+	color: var(--ap-danger);
+}
+.ap-btn-ghost.is-danger:hover {
+	background: var(--ap-danger-subtle);
+}
+/* Cards (below 768 px) show the folder inside the domain only */
+@media (max-width: 767px) {
+	.ap-ftp-base {
+		display: none;
+	}
+}
+@media (min-width: 768px) {
+	.ap-ftp-path {
+		max-width: 0;
+		width: 60%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+}
+
+/* Client pager below a table (x-ap-table per-page) */
+.ap-table-pager {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--ap-space-3);
+	padding: var(--ap-space-3) var(--ap-space-5);
+	border-top: 1px solid var(--ap-border);
+	font-size: var(--ap-text-sm);
+}
+.ap-table-pager .ap-pager button:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.ap-copy-menu {
+	padding: var(--ap-space-2);
+}
+.ap-btn.is-disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
 .ap-card-body {
 	padding: var(--ap-space-4) var(--ap-card-pad);
 }
@@ -3760,6 +4060,18 @@ a.ap-pick:focus-visible {
 	width: min(380px, calc(100vw - 32px));
 	max-height: 70vh;
 	overflow-y: auto;
+}
+/* On a phone the bell is not at the right edge: the panel spans the top bar
+   (the containing block once the tray is not positioned) instead of running
+   off the left side of the screen */
+@media (max-width: 767px) {
+	.ap-tray {
+		position: static;
+	}
+	.ap-tray-panel {
+		inset-inline: var(--ap-space-4);
+		width: auto;
+	}
 }
 .ap-user-panel {
 	min-width: 300px;
@@ -5887,4 +6199,22 @@ a.ap-pick:focus-visible {
 .ap-exclusion-list > li .ap-input {
 	flex: 1 1 16rem;
 	max-width: 32rem;
+}
+
+/* Job Center tray (E15 spec §6.2): the Jobs tab and the running-jobs badge */
+.ap-dot-jobs {
+	inset-inline-end: auto;
+	inset-inline-start: 4px;
+	background: var(--ap-warn, var(--ap-accent));
+}
+.ap-tray-tabs {
+	margin-bottom: var(--ap-space-2);
+}
+.ap-tray-job {
+	color: inherit;
+	text-decoration: none;
+}
+.ap-tray-job:hover,
+.ap-tray-job:focus-visible {
+	background: var(--ap-accent-subtle);
 }

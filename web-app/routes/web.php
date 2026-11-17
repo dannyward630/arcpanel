@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Alerts\AlertController;
 use App\Http\Controllers\AppProcesses\AppProcessController;
 use App\Http\Controllers\AppProcesses\AppProcessPageController;
 use App\Http\Controllers\Audit\AuditController;
@@ -28,6 +29,7 @@ use App\Http\Controllers\Dns\DnsRecordController;
 use App\Http\Controllers\Docker\DockerAppController;
 use App\Http\Controllers\Docker\DockerAppPageController;
 use App\Http\Controllers\Docker\DockerEngineController;
+use App\Http\Controllers\Doctor\DoctorController;
 use App\Http\Controllers\Files\FileController;
 use App\Http\Controllers\Files\FileFetchController;
 use App\Http\Controllers\Files\FilePageController;
@@ -39,6 +41,7 @@ use App\Http\Controllers\Firewall\FirewallController;
 use App\Http\Controllers\Firewall\FirewallIpsetController;
 use App\Http\Controllers\ImpersonationController;
 use App\Http\Controllers\Ips\IpController;
+use App\Http\Controllers\Jobs\JobController;
 use App\Http\Controllers\Keys\AccessKeyController;
 use App\Http\Controllers\Keys\SecretController;
 use App\Http\Controllers\Keys\SshKeyController;
@@ -70,7 +73,6 @@ use App\Http\Controllers\Server\ServerSettingsController;
 use App\Http\Controllers\Server\ServiceConfigController;
 use App\Http\Controllers\Server\ServiceController;
 use App\Http\Controllers\Server\SystemPackageController;
-use App\Http\Controllers\Server\SystemTaskController;
 use App\Http\Controllers\Server\UpdateController;
 use App\Http\Controllers\Shell\LanguageController;
 use App\Http\Controllers\Shell\NotificationController;
@@ -326,12 +328,70 @@ Route::middleware('auth.arc')->group(function () {
         Route::get('/verify', [AuditController::class, 'verify'])->name('verify');
     });
 
+    // Job Center (E15 spec §6.2): every role, scoped by TaskPolicy
+    Route::prefix('jobs')->name('jobs.')->group(function () {
+        Route::get('/', [JobController::class, 'index'])->name('index');
+        Route::get('/tray', [JobController::class, 'tray'])->name('tray');
+        Route::get('/{id}', [JobController::class, 'show'])->where('id', '\d{14}')->name('show');
+        Route::get('/{id}/status', [JobController::class, 'status'])->where('id', '\d{14}')->name('status');
+        Route::middleware('not-readonly')->group(function () {
+            Route::post('/rebuild', [JobController::class, 'rebuild'])->name('rebuild');
+            Route::post('/{id}/cancel', [JobController::class, 'cancel'])->where('id', '\d{14}')->name('cancel');
+            Route::post('/{id}/retry', [JobController::class, 'retry'])->where('id', '\d{14}')->name('retry');
+        });
+    });
+
+    // Alerts and notification channels (E16 spec §7): the scope of an
+    // account, and the server's on Server > Alerts (the user `system`)
+    Route::get('/alerts', [AlertController::class, 'entry'])->name('alerts.index');
+    Route::prefix('alerts/{user}')->name('alerts.')->middleware('effective-user')->group(function () {
+        Route::get('/', [AlertController::class, 'show'])->name('show');
+        Route::middleware('not-readonly')->group(function () {
+            Route::put('/rules/{rule}', [AlertController::class, 'updateRule'])->where('rule', '[a-z0-9.-]{1,64}')->name('rules.update');
+            Route::post('/channels', [AlertController::class, 'storeChannel'])->name('channels.store');
+            Route::put('/channels/{id}', [AlertController::class, 'updateChannel'])->where('id', '\d{14}')->name('channels.update');
+            Route::delete('/channels/{id}', [AlertController::class, 'destroyChannel'])->where('id', '\d{14}')->name('channels.destroy');
+            Route::post('/channels/{id}/test', [AlertController::class, 'testChannel'])->where('id', '\d{14}')->name('channels.test');
+        });
+    });
+    Route::prefix('server/alerts')->name('server.alerts')->group(function () {
+        Route::get('/', [AlertController::class, 'show'])->defaults('user', 'system')->name('');
+        Route::middleware('not-readonly')->group(function () {
+            Route::put('/rules/{rule}', [AlertController::class, 'updateRule'])->where('rule', '[a-z0-9.-]{1,64}')->defaults('user', 'system')->name('.rules.update');
+            Route::post('/channels', [AlertController::class, 'storeChannel'])->defaults('user', 'system')->name('.channels.store');
+            Route::put('/channels/{id}', [AlertController::class, 'updateChannel'])->where('id', '\d{14}')->defaults('user', 'system')->name('.channels.update');
+            Route::delete('/channels/{id}', [AlertController::class, 'destroyChannel'])->where('id', '\d{14}')->defaults('user', 'system')->name('.channels.destroy');
+            Route::post('/channels/{id}/test', [AlertController::class, 'testChannel'])->where('id', '\d{14}')->defaults('user', 'system')->name('.channels.test');
+        });
+    });
+
+    // Server and Site Doctor (E17 spec §5): the server checks, the domains
+    // of an account and the checks of one domain
+    Route::prefix('server/doctor')->name('server.doctor')->group(function () {
+        Route::get('/', [DoctorController::class, 'server'])->name('');
+        Route::middleware('not-readonly')->group(function () {
+            Route::post('/run', [DoctorController::class, 'serverRun'])->name('.run');
+            Route::post('/checks/{check}/fix', [DoctorController::class, 'serverFix'])->where('check', 'server\.[a-z0-9-]{1,64}')->name('.fix');
+        });
+    });
+    Route::get('/doctor', [DoctorController::class, 'entry'])->name('doctor.index');
+    Route::prefix('doctor/{user}')->name('doctor.')->middleware('effective-user')->group(function () {
+        Route::get('/', [DoctorController::class, 'show'])->name('show');
+        Route::get('/{domain}', [DoctorController::class, 'domain'])->where('domain', '[^/]*\.[^/]*')->name('domain');
+        Route::middleware('not-readonly')->group(function () {
+            Route::post('/run', [DoctorController::class, 'run'])->name('run');
+            Route::post('/{domain}/run', [DoctorController::class, 'domainRun'])->where('domain', '[^/]*\.[^/]*')->name('domain.run');
+            Route::post('/{domain}/checks/{check}/fix', [DoctorController::class, 'domainFix'])
+                ->where(['domain' => '[^/]*\.[^/]*', 'check' => '(web|mail)\.[a-z0-9-]{1,64}'])->name('domain.fix');
+        });
+    });
+
     // Statistics and server graphs (E7 batch 2 spec §9.4, §9.5)
     Route::get('/stats', StatsController::class)->name('stats.index');
     Route::get('/server/rrd', RrdPageController::class)->name('server.rrd');
 
-    // System task of the server settings and updates (E7 batch 3 spec §6.2)
-    Route::get('/server/task', SystemTaskController::class)->name('server.task');
+    // The system task of the server settings and updates is a sys.* job:
+    // its panels poll jobs.status (E15 spec §6.2)
 
     // Server settings (E7 batch 3 spec §8)
     Route::prefix('server/settings')->group(function () {
@@ -489,7 +549,6 @@ Route::middleware('auth.arc')->group(function () {
         Route::prefix('api')->name('api.')->group(function () {
             Route::get('/', [AppProcessController::class, 'index'])->name('index');
             Route::get('/options', [AppProcessController::class, 'options'])->name('options');
-            Route::get('/task', [AppProcessController::class, 'task'])->name('task');
             Route::get('/{domain}/{name}', [AppProcessController::class, 'show'])->name('show');
             Route::get('/{domain}/{name}/env', [AppProcessController::class, 'env'])->name('env');
             Route::get('/{domain}/{name}/logs', [AppProcessController::class, 'logs'])->name('logs');
@@ -524,7 +583,6 @@ Route::middleware('auth.arc')->group(function () {
             Route::prefix('api')->name('api.')->group(function () {
                 Route::get('/overview', [NodeController::class, 'overview'])->name('overview');
                 Route::get('/releases', [NodeController::class, 'releases'])->name('releases');
-                Route::get('/task', [NodeController::class, 'task'])->name('task');
                 Route::get('/versions/{version}/packages', [NodeController::class, 'packages'])->name('packages');
                 Route::middleware('not-readonly')->group(function () {
                     Route::post('/enable', [NodeController::class, 'enable'])->name('enable');
@@ -570,7 +628,6 @@ Route::middleware('auth.arc')->group(function () {
     Route::get('/server/docker', [DockerEngineController::class, 'page'])->name('server.docker');
     Route::prefix('server/docker/api')->name('server.docker.api.')->group(function () {
         Route::get('/status', [DockerEngineController::class, 'status'])->name('status');
-        Route::get('/task', [DockerEngineController::class, 'task'])->name('task');
         Route::post('/install', [DockerEngineController::class, 'install'])->middleware('not-readonly')->name('install');
     });
     Route::prefix('docker/{user}')->name('docker.')->middleware('effective-user')->group(function () {
@@ -586,7 +643,6 @@ Route::middleware('auth.arc')->group(function () {
             Route::get('/apps/{name}', [DockerAppController::class, 'show'])->name('apps.show');
             Route::get('/apps/{name}/env', [DockerAppController::class, 'env'])->name('apps.env');
             Route::get('/apps/{name}/logs', [DockerAppController::class, 'logs'])->name('apps.logs');
-            Route::get('/apps/{name}/task', [DockerAppController::class, 'task'])->name('apps.task');
             Route::middleware('not-readonly')->group(function () {
                 Route::post('/apps', [DockerAppController::class, 'store'])->name('apps.store');
                 Route::delete('/apps/{name}', [DockerAppController::class, 'destroy'])->name('apps.destroy');
@@ -701,7 +757,6 @@ Route::middleware('auth.arc')->group(function () {
         $quarantined = ['id' => '[0-9]{14}'];
         Route::get('/', [MalwareController::class, 'show'])->name('show');
         Route::middleware('sys-config:MALWARE_SCAN=yes')->group(function () use ($finding, $quarantined) {
-            Route::get('/task', [MalwareController::class, 'task'])->name('task');
             Route::middleware('not-readonly')->group(function () use ($finding, $quarantined) {
                 Route::post('/scan', [MalwareController::class, 'scan'])->name('scan');
                 Route::post('/findings/{finding}/quarantine', [MalwareController::class, 'quarantine'])->where($finding)->name('quarantine');
@@ -839,11 +894,8 @@ Route::middleware('auth.arc')->group(function () {
             // Quick Install (E7 batch 2 spec §10.2)
             Route::get('/install', [QuickInstallController::class, 'index'])->name('install');
             Route::get('/install/{app}', [QuickInstallController::class, 'form'])->where('app', '[A-Za-z][A-Za-z0-9]{0,63}')->name('install.form');
-            Route::get('/install-task', [QuickInstallController::class, 'task'])->name('install.task');
             Route::post('/install/{app}', [QuickInstallController::class, 'start'])->where('app', '[A-Za-z][A-Za-z0-9]{0,63}')->middleware('not-readonly')->name('install.start');
-            // Git Deploy (E20 §7): the state of the tab and the log of a deploy task
-            Route::get('/deploy/state', [WebDomainDeployController::class, 'state'])->name('deploy.state');
-            Route::get('/deploy/tasks/{task}', [WebDomainDeployController::class, 'task'])->where('task', '\d{14}')->name('deploy.task');
+            // Git Deploy (E20 §7): the tab follows its deploy jobs on jobs.status (E15 §6.2)
 
             Route::middleware('not-readonly')->group(function () {
                 foreach (['general', 'ssl', 'redirect', 'advanced', 'ftp', 'stats'] as $tab) {

@@ -178,8 +178,20 @@ final class Capabilities
         // Quick Install on a web domain (E7 batch 2 spec §10)
         'web.apps.install' => self::ALL_ROLES,
 
-        // REST API v2 task reads (E34 batch 3 spec D33)
+        // REST API v2 task reads (E34 batch 3 spec D33) and the Job Center (E15 spec §6.3)
         'tasks.view' => self::ALL_ROLES,
+        'tasks.manage' => self::ALL_ROLES,
+
+        // Alerts and notification channels (E16 spec §7): the scope of an
+        // account; the server scope needs server.view and server.settings
+        'alerts.view' => self::ALL_ROLES,
+        'alerts.manage' => self::ALL_ROLES,
+
+        // Server and Site Doctor (E17 spec §5): the domains of an account;
+        // the server checks need server.view to read and server.settings to
+        // run or fix
+        'doctor.view' => self::ALL_ROLES,
+        'doctor.run' => self::ALL_ROLES,
 
         // Server pages of E7 batch 3 (spec §5.1)
         'server.services' => self::ADMIN,

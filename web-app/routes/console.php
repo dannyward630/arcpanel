@@ -7,3 +7,13 @@ use Illuminate\Support\Facades\Schedule;
 // The scheduler runs every minute from the arcpanelweb crontab
 // (v-add-sys-panel-files, E3 spec §6.5).
 Schedule::command('files:gc')->everyFifteenMinutes()->withoutOverlapping();
+
+// The job index (E15 spec §6.1): the jobs changed since the last run, and
+// a full rebuild every night
+Schedule::command('arcpanel:jobs-sync')->everyMinute()->withoutOverlapping();
+Schedule::command('arcpanel:jobs-sync --full')->dailyAt('03:50')->withoutOverlapping();
+
+// The alert history (E16 spec §7): the history lines since the last run, and
+// a full rebuild every night
+Schedule::command('arcpanel:alerts-sync')->everyMinute()->withoutOverlapping();
+Schedule::command('arcpanel:alerts-sync --full')->dailyAt('03:55')->withoutOverlapping();

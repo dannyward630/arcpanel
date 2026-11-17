@@ -368,8 +368,10 @@ it('declares an area on the batch 1 routes', function () {
             str_contains($uri, '/app-process') => 'apps',
             str_contains($uri, '/web-domains/{domain}/deploy') => 'deploy',
             str_contains($uri, '/web-domains') => 'web',
+            str_starts_with($uri, 'api/v2/alerts'), str_starts_with($uri, 'api/v2/users/{user}/alert') => 'alerts',
             str_contains($uri, '/secrets') => 'secrets',
             str_contains($uri, '/malware') => 'security',
+            str_starts_with($uri, 'api/v2/users/{user}/doctor') => 'security',
             str_contains($uri, '/dns-zones') => 'dns',
             str_contains($uri, '/mail-domains') => 'mail',
             str_contains($uri, '/databases') => 'db',
@@ -459,7 +461,7 @@ it('documents the task states, the retry limit, renewals and the keep-the-value 
     $operations = apiV2Operations();
     $text = fn (string $id): string => (string) preg_replace('/\s+/', ' ', (string) ($operations[$id]['operation']['description'] ?? ''));
 
-    expect($spec['components']['schemas']['Task']['properties']['status']['enum'] ?? null)->toBe(['queued', 'running', 'succeeded', 'failed'])
+    expect($spec['components']['schemas']['Task']['properties']['status']['enum'] ?? null)->toBe(['queued', 'running', 'succeeded', 'failed', 'cancelled'])
         ->and($spec['components']['schemas']['BackupRun']['properties']['trigger']['enum'] ?? null)->toBe(['schedule', 'request', 'cli'])
         ->and($spec['info']['description'])->toContain('**Asynchronous operations.**', 'QUEUE_MAX_ATTEMPTS', 'x-arcpanel-permission-set');
     foreach (['requestWebDomainLetsEncrypt', 'requestMailDomainLetsEncrypt'] as $id) {

@@ -81,8 +81,10 @@ worker() {
 	result=$(user_result "$owner" "$rc")
 	printf '%s\t%s\n' "$owner" "$result" >> "$results"
 	if [ "$result" != ok ]; then
-		"$BIN/v-add-user-notification" "$owner" "$(notice_title "$result")" \
-			"<p>$(notice_body "$owner")</p>" > /dev/null 2>&1
+		# The user's own scopes hear of it (E16); the server scope gets the
+		# run's event below
+		ALERT_EVENT_USER_ONLY=yes bj_alert_event "$owner" "backup:$owner" "$result" \
+			"$(notice_title "$result") for $owner. $(notice_body "$owner" | sed 's#</\?code>##g')" "$run"
 	fi
 }
 
@@ -150,6 +152,8 @@ bj_runs_reap "$id"
 run="$(date +%s)$(printf '%04d' $((RANDOM % 10000)))"
 results=$(mktemp)
 trap on_exit EXIT
+# A cancelled backup.job job (TERM) records the end of the run too (E15)
+exit_on_signals
 
 # Auto-repair the databases once before backing up the users
 mysqlrepair --all-databases --check --auto-repair > /dev/null 2>&1
@@ -172,7 +176,7 @@ for owner in $(bj_users "$id"); do
 	users+=("$owner")
 done
 bj_run_set "$id" "$run" "TRIGGER=$trigger" STATUS=running "START=$(date +'%F %T')" END= \
-	"USERS=${#users[@]}" DONE=0 FAILED=0 "SKIPPED=$skipped" "PID=$$"
+	"USERS=${#users[@]}" DONE=0 FAILED=0 "SKIPPED=$skipped" "PID=$$" "TASK=${JOB_ID-}"
 bj_set "$id" "LAST_RUN=$run"
 
 parallel=${BACKUP_PARALLEL:-1}

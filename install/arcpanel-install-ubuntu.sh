@@ -33,7 +33,7 @@ VERBOSE='no'
 # Define software versions
 # ArcPanel version: the version of the arcpanel package, stored as VERSION
 # in arcpanel.conf (ADR-0007)
-ARCPANEL_INSTALL_VER='2.7.0~alpha'
+ARCPANEL_INSTALL_VER='3.0.0~alpha'
 
 # Build the full ArcPanel version
 # Split base version (2.0.0) from channel suffix (~alpha / ~beta), if present
@@ -2740,7 +2740,9 @@ echo "10 00 * * * sudo /usr/local/arcpanel/bin/v-update-sys-queue daily" >> /var
 echo "15 02 * * * sudo /usr/local/arcpanel/bin/v-update-sys-queue disk" >> /var/spool/cron/crontabs/arcpanelweb
 echo "10 00 * * * sudo /usr/local/arcpanel/bin/v-update-sys-queue traffic" >> /var/spool/cron/crontabs/arcpanelweb
 echo "30 03 * * * sudo /usr/local/arcpanel/bin/v-update-sys-queue webstats" >> /var/spool/cron/crontabs/arcpanelweb
-echo "*/5 * * * * sudo /usr/local/arcpanel/bin/v-update-sys-queue backup" >> /var/spool/cron/crontabs/arcpanelweb
+echo "* * * * * sudo /usr/local/arcpanel/bin/v-update-sys-jobs > /dev/null 2>&1" >> /var/spool/cron/crontabs/arcpanelweb
+# The nightly Doctor run (E17)
+echo "40 04 * * * sudo /usr/local/arcpanel/bin/v-run-sys-doctor all '' cron > /dev/null 2>&1" >> /var/spool/cron/crontabs/arcpanelweb
 echo "* * * * * sudo /usr/local/arcpanel/bin/v-update-backup-jobs > /dev/null 2>&1" >> /var/spool/cron/crontabs/arcpanelweb
 echo "20 00 * * * sudo /usr/local/arcpanel/bin/v-update-user-stats" >> /var/spool/cron/crontabs/arcpanelweb
 echo "*/5 * * * * sudo /usr/local/arcpanel/bin/v-update-sys-rrd" >> /var/spool/cron/crontabs/arcpanelweb
@@ -2758,6 +2760,8 @@ $ARCPANEL/bin/v-add-sys-app-processes
 $ARCPANEL/bin/v-add-sys-panel-files
 # Secret store: the master key (E38); keep a copy of it off the server
 $ARCPANEL/bin/v-add-sys-secret-key
+# Alerts: data/alerts, the default server rules, the engine every minute (E16)
+$ARCPANEL/bin/v-add-sys-alerts
 # Backups: the local folder becomes a destination and the nightly job (E48)
 $ARCPANEL/bin/v-update-sys-backup-config > /dev/null
 # Server identifier for API clients (E43)
